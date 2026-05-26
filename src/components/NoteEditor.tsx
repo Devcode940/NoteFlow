@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
 import { 
   Bold, 
   Italic, 
@@ -243,7 +244,130 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   };
 
   // Exporters download
-  const handleExport = (format: 'txt' | 'md' | 'html') => {
+  const handleExport = (format: 'txt' | 'md' | 'html' | 'pdf') => {
+    if (format === 'pdf') {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      // Simple margins Setup
+      const leftMargin = 20;
+      const rightMargin = 20;
+      const pageHeight = 277; // A4 height is 297, leaves safe 20mm bottom margin
+
+      // Title
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.setTextColor(15, 23, 42); // slate-900
+      const titleLines = doc.splitTextToSize(note.title || 'Untitled Note', 170); // 210 - margins
+      doc.text(titleLines, leftMargin, 25);
+      let y = 25 + (titleLines.length * 8);
+
+      // Divider Line
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(leftMargin, y, 210 - rightMargin, y);
+      y += 10;
+
+      // Note content split by line
+      const rawLines = note.content.split('\n');
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 41, 59); // slate-800
+
+      for (let i = 0; i < rawLines.length; i++) {
+        const line = rawLines[i];
+        
+        let isHeading1 = line.startsWith('# ');
+        let isHeading2 = line.startsWith('## ');
+        let isHeading3 = line.startsWith('### ');
+        let isBullet = line.startsWith('- ') || line.startsWith('* ');
+        let isTodoUnchecked = line.startsWith('- [ ] ');
+        let isTodoChecked = line.startsWith('- [x] ') || line.startsWith('- [X] ');
+
+        let textToRender = line;
+        let indent = leftMargin;
+
+        if (isHeading1) {
+          doc.setFont('Helvetica', 'bold');
+          doc.setFontSize(16);
+          doc.setTextColor(15, 23, 42);
+          textToRender = line.replace(/^#\s+/, '');
+        } else if (isHeading2) {
+          doc.setFont('Helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.setTextColor(15, 23, 42);
+          textToRender = line.replace(/^##\s+/, '');
+        } else if (isHeading3) {
+          doc.setFont('Helvetica', 'bold');
+          doc.setFontSize(12);
+          doc.setTextColor(15, 23, 42);
+          textToRender = line.replace(/^###\s+/, '');
+        } else if (isTodoUnchecked) {
+          doc.setFont('Helvetica', 'normal');
+          doc.setFontSize(11);
+          doc.setTextColor(71, 85, 105);
+          textToRender = '[ ] ' + line.replace(/^\-\s\[\s\]\s+/, '');
+          indent = leftMargin + 5;
+        } else if (isTodoChecked) {
+          doc.setFont('Helvetica', 'normal');
+          doc.setFontSize(11);
+          doc.setTextColor(148, 163, 184); // light gray representation
+          textToRender = '[x] ' + line.replace(/^\-\s\[[xX]\]\s+/, '');
+          indent = leftMargin + 5;
+        } else if (isBullet) {
+          doc.setFont('Helvetica', 'normal');
+          doc.setFontSize(11);
+          doc.setTextColor(30, 41, 59);
+          textToRender = '• ' + line.replace(/^[\-\*]\s+/, '');
+          indent = leftMargin + 5;
+        } else {
+          doc.setFont('Helvetica', 'normal');
+          doc.setFontSize(11);
+          doc.setTextColor(30, 41, 59);
+        }
+
+        const maxLineWidth = 210 - indent - rightMargin;
+        const wrappedLines = doc.splitTextToSize(textToRender, maxLineWidth);
+
+        const headingSpacing = (isHeading1 || isHeading2 || isHeading3) ? 4 : 0;
+        const lineSpacing = 6;
+        const blockHeight = (wrappedLines.length * lineSpacing) + headingSpacing;
+
+        // Page break safety check
+        if (y + blockHeight > pageHeight) {
+          doc.addPage();
+          y = 20;
+        }
+
+        y += headingSpacing;
+
+        // Render each block line
+        for (let j = 0; j < wrappedLines.length; j++) {
+          if (y > pageHeight) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.text(wrappedLines[j], indent, y);
+          y += lineSpacing;
+        }
+
+        // Standard spacer below paragraph/format unit
+        if (line.trim() === '') {
+          y += 1.5;
+        } else {
+          y += 1;
+        }
+      }
+
+      // Trigger download
+      doc.save(`${note.title.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'note'}.pdf`);
+      setShowExportMenu(false);
+      return;
+    }
+
     let outputText = '';
     let mimeType = 'text/plain';
     let fileExtension = 'txt';
@@ -434,6 +558,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                   className="w-full text-left px-2 py-1.5 text-xs font-semibold rounded hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
                   Web Document (.html)
+                </button>
+                <button 
+                  onClick={() => handleExport('pdf')}
+                  className="w-full text-left px-2 py-1.5 text-xs font-semibold rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold"
+                >
+                  PDF Document (.pdf)
                 </button>
               </div>
             )}
