@@ -3,11 +3,48 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+
+// CORS configuration - restrict to known origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'];
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app') || origin.endsWith('.netlify.app')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Rate limiting for AI endpoints to prevent DoS and cost exploitation
+const aiRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20, // Limit each IP to 20 requests per minute
+  message: { error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Stricter rate limit for generation endpoints
+const generateRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // Limit each IP to 10 requests per minute
+  message: { error: 'Too many generation requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -89,14 +126,33 @@ app.get("/api/health", (req, res) => {
 });
 
 // Endpoint 1: Conversational Chat with Notes Context
-app.post("/api/ai/chat", async (req, res): Promise<any> => {
+app.post("/api/ai/chat", aiRateLimiter, async (req, res): Promise<any> => {
   try {
     const { messages, systemContext } = req.body;
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "Messages array is required." });
     }
 
-    const systemInstruction = `You are a helpful NoteFlow AI Assistant. Adhere to formatting guidelines, keep answers highly readable. Use the user's active notes context if relevant:\n\n${systemContext || ""}`;
+    // Input validation - limit message count and length to prevent abuse
+    if (messages.length > 50) {
+      return res.status(400).json({ error: "Maximum 50 messages allowed per request." });
+    }
+    
+    for (const msg of messages) {
+      if (!msg.content || typeof msg.content !== 'string') {
+        return res.status(400).json({ error: "Each message must have a string content." });
+      }
+      if (msg.content.length > 50000) {
+        return res.status(400).json({ error: "Message content exceeds maximum length of 50,000 characters." });
+      }
+    }
+
+    // Sanitize system context to prevent prompt injection
+    const sanitizedContext = systemContext 
+      ? String(systemContext).substring(0, 10000)
+      : "";
+
+    const systemInstruction = `You are a helpful NoteFlow AI Assistant. Adhere to formatting guidelines, keep answers highly readable. Use the user's active notes context if relevant:\n\n${sanitizedContext}`;
 
     const responseText = await generateAIContent({
       systemInstruction,
@@ -107,16 +163,37 @@ app.post("/api/ai/chat", async (req, res): Promise<any> => {
     res.json({ content: responseText || "I was unable to formulate a response. Please try reframing your query." });
   } catch (err: any) {
     console.error("Error in /api/ai/chat:", err);
-    res.status(500).json({ error: err.message || "An error occurred with the AI Service." });
+    // Don't expose internal error details to client
+    res.status(500).json({ error: "An error occurred processing your request. Please try again later." });
   }
 });
 
 // Endpoint 2: Note-Taking Quick Actions (Summarize, Translate, Bulletify, Improve...)
-app.post("/api/ai/action", async (req, res): Promise<any> => {
+app.post("/api/ai/action", aiRateLimiter, async (req, res): Promise<any> => {
   try {
     const { action, text, instructions } = req.body;
     if (!text || !action) {
       return res.status(400).json({ error: "Text and action types are required." });
+    }
+
+    // Input validation - limit text length to prevent abuse
+    if (typeof text !== 'string') {
+      return res.status(400).json({ error: "Text must be a string." });
+    }
+    if (text.length > 100000) {
+      return res.status(400).json({ error: "Text exceeds maximum length of 100,000 characters." });
+    }
+    
+    // Validate action type
+    const validActions = ["autotitle", "summarize", "improve", "expand", "simplify", "translate", "fix", "tone", "bullets", "headline", "todos", "questions"];
+    if (!validActions.includes(action)) {
+      return res.status(400).json({ error: "Invalid action type." });
+    }
+    
+    // Sanitize instructions to prevent prompt injection
+    let sanitizedInstructions = "";
+    if (instructions) {
+      sanitizedInstructions = String(instructions).substring(0, 500);
     }
 
     let actionPrompt = "";
@@ -137,14 +214,14 @@ app.post("/api/ai/action", async (req, res): Promise<any> => {
         actionPrompt = "De-jargon and simplify this text to make it easy to understand for a general reader.";
         break;
       case "translate":
-        const targetLang = instructions || "Spanish";
+        const targetLang = sanitizedInstructions || "Spanish";
         actionPrompt = `Translate this text accurately into ${targetLang}, ensuring local idioms and formatting are natural.`;
         break;
       case "fix":
         actionPrompt = "Fix all grammatical, spelling, and structural punctuation issues. Return only the revised text with no external commentary.";
         break;
       case "tone":
-        const targetTone = instructions || "Professional";
+        const targetTone = sanitizedInstructions || "Professional";
         actionPrompt = `Change the tone of this text to ${targetTone} style. Keep the core information intact.`;
         break;
       case "bullets":
@@ -175,16 +252,37 @@ app.post("/api/ai/action", async (req, res): Promise<any> => {
     res.json({ result: responseText || "" });
   } catch (err: any) {
     console.error("Error in /api/ai/action:", err);
-    res.status(500).json({ error: err.message || "An error occurred processing the action." });
+    // Don't expose internal error details to client
+    res.status(500).json({ error: "An error occurred processing the action. Please try again later." });
   }
 });
 
 // Endpoint 3: Template & Outline Generator (Draft, Outlines, Ideas)
-app.post("/api/ai/generate", async (req, res): Promise<any> => {
+app.post("/api/ai/generate", generateRateLimiter, async (req, res): Promise<any> => {
   try {
     const { type, prompt, noteContext } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: "Prompt/Goal is required." });
+    }
+
+    // Input validation - limit prompt and context length
+    if (typeof prompt !== 'string') {
+      return res.status(400).json({ error: "Prompt must be a string." });
+    }
+    if (prompt.length > 10000) {
+      return res.status(400).json({ error: "Prompt exceeds maximum length of 10,000 characters." });
+    }
+    
+    // Validate type parameter
+    const validTypes = ["outline", "draft", "ideas", "continue"];
+    if (type && !validTypes.includes(type)) {
+      return res.status(400).json({ error: "Invalid generation type." });
+    }
+    
+    // Sanitize noteContext to prevent prompt injection
+    let sanitizedContext = "";
+    if (noteContext) {
+      sanitizedContext = String(noteContext).substring(0, 20000);
     }
 
     const generateInstruction = ""; // Defined below
@@ -196,7 +294,7 @@ app.post("/api/ai/generate", async (req, res): Promise<any> => {
     } else if (type === "ideas") {
       actualInstruction = "Generate a rich list of 10 creative, actionable brainstorming ideas, angles, or notes based on the prompt.";
     } else if (type === "continue") {
-      actualInstruction = `Continue writing from the perspective of the existing note context.\nContext Notes:\n"""\n${noteContext || ""}\n"""`;
+      actualInstruction = `Continue writing from the perspective of the existing note context.\nContext Notes:\n"""\n${sanitizedContext}\n"""`;
     } else {
       actualInstruction = "Write relevant document content based on the prompt.";
     }
@@ -212,7 +310,8 @@ app.post("/api/ai/generate", async (req, res): Promise<any> => {
     res.json({ result: responseText || "" });
   } catch (err: any) {
     console.error("Error in /api/ai/generate:", err);
-    res.status(500).json({ error: err.message || "An error occurred generating the content." });
+    // Don't expose internal error details to client
+    res.status(500).json({ error: "An error occurred generating the content. Please try again later." });
   }
 });
 

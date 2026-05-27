@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
+import DOMPurify from 'dompurify';
 import { 
   Bold, 
   Italic, 
@@ -195,7 +196,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     onUpdateNote(note.id, { tags: updatedTags });
   };
 
-  // Simple Markdown to HTML preview generator
+  // Simple Markdown to HTML preview generator with XSS protection
   const getRenderedHTML = (content: string) => {
     if (!content.trim()) {
       return `<p class="italic text-slate-400">This page is currently empty. Start typing to see formatting here...</p>`;
@@ -240,7 +241,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       return `<p>${p.replace(/\n/g, '<br />')}</p>`;
     }).join('');
 
-    return html;
+    // Use DOMPurify to sanitize the generated HTML and prevent XSS attacks
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['h1', 'h2', 'h3', 'p', 'br', 'strong', 'em', 'mark', 'code', 'blockquote', 'ul', 'li', 'hr', 'input'],
+      ALLOWED_ATTR: ['class', 'type', 'disabled', 'checked']
+    });
   };
 
   // Exporters download
