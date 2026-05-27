@@ -1,8 +1,28 @@
-node_modules/
-build/
+```
+# Build artifacts
 dist/
-coverage/
-.DS_Store
+build/
+*.js
+*.css
+*.map
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Cache
+.cache/
+.node_cache/
+.npm/
+
+# Logs
 *.log
-.env*
-!.env.example
+
+# OS generated files
+.DS_Store
+Thumbs.db
+```
