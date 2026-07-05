@@ -75,6 +75,30 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   // Speech Recognition
   const [isListening, setIsListening] = React.useState(false);
   const recognitionRef = useRef<any>(null);
+  const noteIdRef = useRef(note?.id);
+
+  useEffect(() => {
+    noteIdRef.current = note?.id;
+  }, [note?.id]);
+
+  const insertTranscriptAtCursor = (transcript: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea || !noteIdRef.current) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+
+    const newContent = text.substring(0, start) + transcript + ' ' + text.substring(end);
+
+    onUpdateNote(noteIdRef.current, { content: newContent });
+
+    setTimeout(() => {
+      textarea.focus();
+      const newCursor = start + transcript.length + 1;
+      textarea.setSelectionRange(newCursor, newCursor);
+    }, 10);
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
@@ -91,7 +115,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           }
         }
         if (finalTranscript) {
-           insertFormatting(finalTranscript, '');
+          insertTranscriptAtCursor(finalTranscript);
         }
       };
 
@@ -229,9 +253,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     html = html.replace(/^\-\s\[\s\]\s(.*?)$/gm, '<li class="list-none flex items-center gap-2"><input type="checkbox" disabled class="w-3.5 h-3.5 mt-0.5 rounded border-slate-300" /> $1</li>');
     html = html.replace(/^\-\s\[x\]\s(.*?)$/gm, '<li class="list-none flex items-center gap-2 text-slate-400 line-through"><input type="checkbox" checked disabled class="w-3.5 h-3.5 mt-0.5 rounded border-slate-300" /> $1</li>');
     html = html.replace(/^\-\s(?!\[)(.*?)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li.*?>.*?<\/li>)/gs, '<ul>$1<\/ul>');
-    // Remove consecutive sub-lists borders
-    html = html.replace(/<\/ul>\s*<ul>/g, '');
+    // Wrap consecutive <li> elements in <ul> tags
+    html = html.replace(/((?:<li[^>]*>.*?<\/li>\n*)+)/g, '<ul>$1</ul>');
 
     // Convert newlines to breaks where appropriate
     html = html.split('\n\n').map(p => {
@@ -387,11 +410,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       fileExtension = 'md';
     } else if (format === 'html') {
       const bodyHtml = getRenderedHTML(note.content);
+      const escapedTitle = note.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       outputText = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>${note.title}</title>
+  <title>${escapedTitle}</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 650px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #1e293b; }
     h1 { font-size: 2em; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; }
@@ -401,7 +425,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   </style>
 </head>
 <body>
-  <h1>${note.title}</h1>
+  <h1>${escapedTitle}</h1>
   ${bodyHtml}
 </body>
 </html>`;
@@ -448,7 +472,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             </div>
           ) : (
             <button
-              onClick={onSignInTrigger}
+              onClick={() => onSignInTrigger?.()}
               className={`flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-bold transition-all duration-300 cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-700 ${
                 saveStatus === 'saving' 
                   ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20 text-amber-600 dark:text-amber-400' 

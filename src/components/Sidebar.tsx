@@ -1,10 +1,7 @@
 import React, { useState } from 'react';
 import { 
-  Folder, 
   FolderPlus, 
   Tag, 
-  Settings, 
-  BookOpen, 
   Moon, 
   Sun, 
   ChevronLeft, 
@@ -18,7 +15,7 @@ import {
   Cloud,
   CheckCircle2
 } from 'lucide-react';
-import { Folder as FolderType, Theme, GoogleUser } from '../types';
+import { Folder as FolderType, Theme, GoogleUser, DEFAULT_FOLDERS } from '../types';
 
 interface SidebarProps {
   folders: FolderType[];
@@ -70,8 +67,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
   // Group default folders vs custom folders
-  const defaultFolders = folders.slice(0, 7);
-  const customFolders = folders.slice(7);
+  const defaultFolders = folders.slice(0, DEFAULT_FOLDERS.length);
+  const customFolders = folders.slice(DEFAULT_FOLDERS.length);
 
   const handleCreateFolderSubmit = (e: React.FormEvent) => {
     e.preventDefault();

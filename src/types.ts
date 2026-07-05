@@ -1,7 +1,4 @@
-// ============================================================================
-// Types & Interfaces
-// ============================================================================
-
+// Note type
 export interface Note {
   id: string;
   title: string;
@@ -31,30 +28,9 @@ export type Theme = 'light' | 'dark';
 export type SortBy = 'updatedAt' | 'createdAt' | 'title';
 export type SortOrder = 'asc' | 'desc';
 export type SaveStatus = 'saved' | 'saving' | 'unsaved';
-export type ExportFormat = 'text' | 'html' | 'markdown';
-
-export interface AppState {
-  notes: Note[];
-  folders: Folder[];
-  activeNoteId: string | null;
-  activeFolder: string;
-  searchQuery: string;
-  viewMode: ViewMode;
-  theme: Theme;
-  showRightPanel: boolean;
-  sidebarCollapsed: boolean;
-  sortBy: SortBy;
-  sortOrder: SortOrder;
-  saveStatus: SaveStatus;
-  // Mobile state
-  showMobileMenu: boolean;
-  showMobileNoteList: boolean;
-}
 
 // ============================================================================
 // Constants
-// ============================================================================
-
 export const DEFAULT_FOLDERS: Folder[] = [
   { id: 'all', name: 'All Notes', icon: '📋', color: '#7c3aed' },
   { id: 'favorites', name: 'Favorites', icon: '⭐', color: '#f59e0b' },
@@ -78,10 +54,7 @@ export const KEYBOARD_SHORTCUTS = {
   underline: { key: 'u', ctrl: true, description: 'Underline' },
 } as const;
 
-// ============================================================================
-// AI Types
-// ============================================================================
-
+// AI types
 export interface AIMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -104,6 +77,7 @@ export interface AIMemory {
 }
 
 export type AIQuickAction = 
+  | 'autotitle'
   | 'summarize' 
   | 'improve' 
   | 'expand' 
@@ -112,7 +86,8 @@ export type AIQuickAction =
   | 'fix' 
   | 'tone' 
   | 'bullets' 
-  | 'headlines' 
+  | 'headline' 
+  | 'todos'
   | 'questions';
 
 export type AIGenerateType = 'outline' | 'draft' | 'ideas' | 'continue';

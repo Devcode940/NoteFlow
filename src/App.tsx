@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sidebar } from './components/Sidebar';
 import { NoteList } from './components/NoteList';
@@ -27,13 +27,11 @@ import {
   AI_MEMORY_KEY,
   GoogleUser
 } from './types';
-import { Menu, Sparkles, FolderClosed, Plus, FileText, Edit2, LogOut, CheckCircle2, Lock, CloudRain, ShieldAlert } from 'lucide-react';
+import { Menu, Sparkles, FolderClosed, Plus, FileText, Edit2, LogOut, CheckCircle2, Lock } from 'lucide-react';
 
 
 export default function App() {
-  // ============================================================================
-  // Primary States Initialization
-  // ============================================================================
+  // Main state
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>(DEFAULT_FOLDERS);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
@@ -43,6 +41,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('editor');
   const [theme, setTheme] = useState<Theme>('light');
   
+  // UI state
   const [showRightPanel, setShowRightPanel] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>('updatedAt');
@@ -50,12 +49,12 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
-  // Welcome Splash & Loader States
+  // Splash screen
   const [showSplash, setShowSplash] = useState(true);
   const [splashProgress, setSplashProgress] = useState(0);
-  const [splashStatus, setSplashStatus] = useState("Booting NoteFlow Workspace...");
+  const [splashStatus, setSplashStatus] = useState("Loading...");
 
-  // Google User Auth States
+  // User auth
   const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginRequiredReason, setLoginRequiredReason] = useState("");
@@ -63,12 +62,13 @@ export default function App() {
   const [customEmail, setCustomEmail] = useState("");
   const [customName, setCustomName] = useState("");
 
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // AI states
+  // AI chat
   const [aiHistory, setAiHistory] = useState<AIMessage[]>([]);
   const [aiExternalPrompt, setAiExternalPrompt] = useState<string>('');
 
-  // Mobile navigation drawers states
+  // Mobile nav
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileNoteListOpen, setMobileNoteListOpen] = useState(true);
 
@@ -88,25 +88,26 @@ export default function App() {
         const seedNotes: Note[] = [
           {
             id: 'welcome-note-1',
-            title: 'Getting Started with NoteFlow 🚀',
-            content: `Welcome to **NoteFlow AI** — the ultimate obsidian-grade distraction-free writing workbench! 
+            title: 'Welcome to NoteFlow',
+            content: `Hey there! Welcome to NoteFlow.
 
-### Key Features
-- **Notebook Organization**: Group pages with custom emoji binders in the left directory.
-- **Dynamic hashtag indexing**: Type tags starting with #, such as #studies, #cook, or #todo inside your documents to index them.
-- **Gemini Copilot**: Secure server-side AI that can summarize, proofread, or brainstorming ideas in real-time.
-- **Offline local persistence**: Automatically saves changes as you type to your local storage.
-- **Export options**: Download as Plain TXT, styled Markdown, or printable Web Document HTML.
+This is your first note. Here's what you can do:
 
-### Keyboard Shortcuts
-1. New File: \`Ctrl + N\`
-2. Open AI Assistant Panel: \`Ctrl + J\`
-3. Bold Text: Select words and press \`Ctrl + B\` (it inserts markdown symbols!)
-4. Highlight selection: Press \`Ctrl + H\` to wrap text in ==highlights==.
+- Create folders to organize your notes
+- Use #tags to categorize things (like #work or #personal)
+- Try the AI assistant for help with writing
+- Your work auto-saves as you type
+- Export notes as text, markdown, HTML, or PDF
 
-Open the presentation preview from the top workspace bar to see this page formatted beautifully. Enjoy writing!`,
+Quick shortcuts:
+- Ctrl+N: New note
+- Ctrl+J: Open AI
+- Ctrl+B: Make text bold
+- Ctrl+H: Highlight text
+
+Switch to preview mode to see how this looks formatted. Happy writing!`,
             folderId: 'all',
-            tags: ['welcome', 'guide', 'studies'],
+            tags: ['welcome', 'guide'],
             pinned: true,
             archived: false,
             trashed: false,
@@ -197,7 +198,7 @@ Open the presentation preview from the top workspace bar to see this page format
     return () => clearInterval(interval);
   }, [showSplash]);
 
-  // Retrieve Google session
+  // Load saved user session
   useEffect(() => {
     try {
       const persistedUser = localStorage.getItem('noteflow-google-user');
@@ -205,7 +206,7 @@ Open the presentation preview from the top workspace bar to see this page format
         setGoogleUser(JSON.parse(persistedUser));
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load user:', e);
     }
   }, []);
 
@@ -221,7 +222,7 @@ Open the presentation preview from the top workspace bar to see this page format
     setShowLoginModal(false);
 
     if (pendingCallback) {
-      pendingCallback();
+      Promise.resolve(pendingCallback()).catch(console.error);
       setPendingCallback(null);
     }
   };
@@ -235,7 +236,7 @@ Open the presentation preview from the top workspace bar to see this page format
 
   const ensureGoogleUser = (callback: () => void, message?: string) => {
     if (googleUser) {
-      callback();
+      Promise.resolve(callback()).catch(console.error);
     } else {
       setLoginRequiredReason(message || "Please sign in with Google to authorize Cloud backups and advanced AI Summary features.");
       setPendingCallback(() => callback);
@@ -276,28 +277,23 @@ Open the presentation preview from the top workspace bar to see this page format
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
-  // ============================================================================
-  // Global Keyboard Shortcuts
-  // ============================================================================
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Create Note: Ctrl + N
       if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         handleCreateNote();
       }
-      // AI Panel Toggle: Ctrl + J
       if (e.key === 'j' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setShowRightPanel(prev => !prev);
       }
-      // Quick Save status animation: Ctrl + S
       if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setSaveStatus('saving');
         setTimeout(() => setSaveStatus('saved'), 600);
       }
-      // Command Palette Toggle: Ctrl + K
+      if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
       if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setCommandPaletteOpen(prev => !prev);
@@ -327,47 +323,44 @@ Open the presentation preview from the top workspace bar to see this page format
     new Set(notes.filter(n => !n.trashed && !n.archived).flatMap(n => n.tags))
   ).sort();
 
-  // ============================================================================
   // Handlers
-  // ============================================================================
-  
-  // Note Updates Engine with word metrics & live tag scanning
+  // Update note with word/char counting
   const handleUpdateNote = (id: string, updates: Partial<Note>) => {
     setSaveStatus('saving');
+
+    let syncedNote: Note | null = null;
 
     setNotes(prev => prev.map(note => {
       if (note.id !== id) return note;
 
       const merged = { ...note, ...updates, updatedAt: Date.now() };
 
-      // Re-scan words/characters if content itself changes
       if (updates.content !== undefined) {
         const text = updates.content;
         merged.charCount = text.length;
         merged.wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
         
-        // Scan hashtag index and map it automatically
+        // Extract tags from content
         const contentTags = extractTags(text);
-        // Retain any existing manually created tags
         const combined = Array.from(new Set([...note.tags, ...contentTags]));
         merged.tags = combined;
       }
 
-      // Sync updated note to Supabase if config available
-      syncNoteToSupabase(merged);
-
+      syncedNote = merged;
       return merged;
     }));
 
-    // Reset indicator to "Saved" after 500ms delay
-    const saveTimer = setTimeout(() => {
+    if (syncedNote) {
+      syncNoteToSupabase(syncedNote);
+    }
+
+    // TODO: maybe use debounce here instead?
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
       setSaveStatus('saved');
     }, 500);
-
-    return () => clearTimeout(saveTimer);
   };
 
-  // Create Note
   const handleCreateNote = () => {
     const newNote: Note = {
       id: crypto.randomUUID(),
@@ -404,9 +397,8 @@ Open the presentation preview from the top workspace bar to see this page format
     setActiveFolder(newFolder.id);
   };
 
-  // Delete Custom Folder
   const handleDeleteFolder = (id: string) => {
-    if (confirm("Are you sure you want to delete this Notebook? Notes inside will remain in 'All Notes' but their custom space binder will clear.")) {
+    if (confirm("Delete this folder? Notes will move to All Notes.")) {
       setFolders(prev => prev.filter(f => f.id !== id));
       deleteFolderFromSupabase(id);
       // Re-associate orphaned notes back to 'all'
@@ -567,7 +559,7 @@ Open the presentation preview from the top workspace bar to see this page format
     <div className={`h-screen w-screen flex overflow-hidden select-none font-sans transition-colors duration-300
       ${theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'}`}
     >
-      {/* 2.2-Second Animated Splash Loader */}
+      {/* Splash screen */}
       <AnimatePresence>
         {showSplash && (
           <motion.div
@@ -745,11 +737,9 @@ Open the presentation preview from the top workspace bar to see this page format
         </div>
       )}
 
-      {/* ============================================================================
-          Responsive Desktop / Layout Wrapper
-         ============================================================================ */}
+      {/* Main layout */}
       
-      {/* 1. Sidebar Container (Leftmost) */}
+      {/* Sidebar */}
       <div className={`hidden md:block h-full shrink-0 ${sidebarCollapsed ? 'w-16' : 'w-64'}`}>
         <Sidebar
           folders={folders}
@@ -812,7 +802,7 @@ Open the presentation preview from the top workspace bar to see this page format
             onQuickAction={handleQuickAction}
             promptAISpawn={handleAISpawnPrompt}
             googleUser={googleUser}
-            onSignInTrigger={() => ensureGoogleUser(() => {}, "Google Account Sign-In required to configure cloud sync backups.")}
+            onSignInTrigger={(cb) => ensureGoogleUser(cb || (() => {}), "Google Account Sign-In required to configure cloud sync backups.")}
           />
         </div>
       </div>
@@ -831,14 +821,12 @@ Open the presentation preview from the top workspace bar to see this page format
             externalPrompt={aiExternalPrompt}
             clearExternalPrompt={() => setAiExternalPrompt('')}
             googleUser={googleUser}
-            onSignInTrigger={() => ensureGoogleUser(() => {}, "Synchronizing Assistant logs requires an connected Google cloud index.")}
+            onSignInTrigger={(cb) => ensureGoogleUser(cb || (() => {}), "Synchronizing Assistant logs requires an connected Google cloud index.")}
           />
         </div>
       )}
 
-      {/* ============================================================================
-          Overlay Windows
-         ============================================================================ */}
+      {/* Overlays */}
       <CommandPalette 
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
@@ -858,11 +846,9 @@ Open the presentation preview from the top workspace bar to see this page format
         }}
       />
 
-      {/* ============================================================================
-          Unified Mobile Overlay Navigation Drawers
-         ============================================================================ */}
+      {/* Mobile navigation */}
       
-      {/* 1. Mobile Left Sidebar Slider drawer */}
+      {/* Mobile sidebar */}
       {mobileSidebarOpen && (
         <div className="fixed inset-0 pb-[60px] z-50 flex md:hidden animate-fade-in">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileSidebarOpen(false)} />
@@ -904,10 +890,7 @@ Open the presentation preview from the top workspace bar to see this page format
             <NoteList
               notes={notes}
               folders={folders}
-              activeNoteId={(id) => {
-                setActiveNoteId(id);
-                setMobileNoteListOpen(false);
-              }}
+              activeNoteId={activeNoteId}
               setActiveNoteId={(id) => {
                 setActiveNoteId(id);
                 setMobileNoteListOpen(false);
@@ -977,7 +960,7 @@ Open the presentation preview from the top workspace bar to see this page format
               externalPrompt={aiExternalPrompt}
               clearExternalPrompt={() => setAiExternalPrompt('')}
               googleUser={googleUser}
-              onSignInTrigger={() => ensureGoogleUser(() => {})}
+              onSignInTrigger={(cb) => ensureGoogleUser(cb || (() => {}))}
             />
           </div>
         </div>

@@ -4,17 +4,16 @@ import {
   ChevronDown, 
   ChevronUp, 
   Star, 
-  Trash, 
   Archive, 
   Plus, 
   Calendar,
   Tag,
   FolderOpen
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { Note, Folder, SortBy, SortOrder } from '../types';
+import { motion, type Variants } from 'motion/react';
+import { Note, Folder, SortBy, SortOrder, DEFAULT_FOLDERS } from '../types';
 
-const containerVariants = {
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -25,7 +24,7 @@ const containerVariants = {
   }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { y: 12, opacity: 0 },
   show: { 
     y: 0, 
@@ -325,18 +324,18 @@ export const NoteList: React.FC<NoteListProps> = ({
 
                   {/* Icons for states */}
                   <div className="flex items-center gap-1.5">
-                    {note.archived && <Archive className="w-3 h-3 text-teal-500" title="Archived" />}
+                    {note.archived && <Archive className="w-3 h-3 text-teal-500" />}
                     
                     {/* Folder label */}
                     {originalFolder && originalFolder.id !== 'all' && (
-                      <span className="flex items-center gap-0.5 truncate max-w-20 bg-slate-100 dark:bg-slate-800 px-1 rounded text-slate-500 py-0.2 shrink-0">
+                      <span className="flex items-center gap-0.5 truncate max-w-20 bg-slate-100 dark:bg-slate-800 px-1 rounded text-slate-500 py-0.5 shrink-0">
                         <span>{originalFolder.icon}</span>
                         <span className="truncate">{originalFolder.name}</span>
                       </span>
                     )}
 
                     {/* Simple Folder Mover for quick relocation */}
-                    {!note.trashed && !note.archived && allFolders.length > 7 && (
+                    {!note.trashed && !note.archived && allFolders.length > DEFAULT_FOLDERS.length && (
                       <div className="relative inline-block opacity-0 group-hover:opacity-100 transition-opacity">
                         <select
                           onClick={(e) => e.stopPropagation()}
@@ -349,7 +348,7 @@ export const NoteList: React.FC<NoteListProps> = ({
                           className="absolute inset-0 opacity-0 cursor-pointer w-4 h-4"
                         >
                           <option disabled value="">Move to...</option>
-                          {allFolders.slice(2).map((fol) => (
+                          {allFolders.filter(f => f.id !== 'all' && f.id !== 'favorites').map((fol) => (
                             <option key={fol.id} value={fol.id}>
                               {fol.icon} {fol.name}
                             </option>

@@ -247,7 +247,7 @@ export const AIPanel: React.FC<AIPanelProps> = ({
         {/* Intro greeting card when chat is empty */}
         {history.length === 0 && (
           <div className="py-6 space-y-5 animate-fade-in select-none">
-            <div className="p-4 rounded-xl bg-white dark:bg-slate-800/50 border dark:border-slate-800 p-4 space-y-2.5 shadow-sm text-center">
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-800/50 border dark:border-slate-800 space-y-2.5 shadow-sm text-center">
               <Sparkles className="w-7 h-7 text-indigo-500 fill-indigo-100 mx-auto" />
               <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">How can I help with your writing?</h4>
               <p className="text-[10.5px] text-slate-400 dark:text-slate-500 leading-relaxed max-w-xs mx-auto">
@@ -424,7 +424,7 @@ export const AIPanel: React.FC<AIPanelProps> = ({
         </form>
 
         <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center mt-2 font-medium">
-          Gemini 3.5-flash Grounded Model • Chats are context-aware
+          Gemini 2.5-flash Grounded Model • Chats are context-aware
         </p>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, File, Plus, Sun, Moon, Sparkles, Folder as FolderIcon } from 'lucide-react';
+import { Search, File, Plus, Sun, Moon, Sparkles } from 'lucide-react';
 import { Note, Theme, Folder } from '../types';
 
 interface CommandPaletteProps {
@@ -45,9 +45,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     const q = query.toLowerCase();
     
     const actions = [
-      { id: 'create', title: 'Create new note', icon: Plus, group: 'Actions', onSelect: onCreateNote },
-      { id: 'ask', title: 'Ask AI Assistant', icon: Sparkles, group: 'Actions', onSelect: onAskAI },
-      { id: 'theme', title: `Toggle ${theme === 'dark' ? 'Light' : 'Dark'} Mode`, icon: theme === 'dark' ? Sun : Moon, group: 'Actions', onSelect: onToggleTheme },
+      { id: 'create', title: 'Create new note', icon: Plus, group: 'Actions', subtitle: undefined as string | undefined, onSelect: onCreateNote },
+      { id: 'ask', title: 'Ask AI Assistant', icon: Sparkles, group: 'Actions', subtitle: undefined as string | undefined, onSelect: onAskAI },
+      { id: 'theme', title: `Toggle ${theme === 'dark' ? 'Light' : 'Dark'} Mode`, icon: theme === 'dark' ? Sun : Moon, group: 'Actions', subtitle: undefined as string | undefined, onSelect: onToggleTheme },
     ].filter(a => a.title.toLowerCase().includes(q));
 
     const noteItems = validNotes

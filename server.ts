@@ -11,11 +11,11 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-// CORS configuration - restrict to known origins
+// Setup CORS
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'];
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
+    // Allow requests without origin (mobile apps, curl, etc)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app') || origin.endsWith('.netlify.app')) {
       callback(null, true);
@@ -28,19 +28,19 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Rate limiting for AI endpoints to prevent DoS and cost exploitation
+// Rate limiting for AI endpoints
 const aiRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 20, // Limit each IP to 20 requests per minute
+  windowMs: 60 * 1000,
+  max: 20,
   message: { error: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Stricter rate limit for generation endpoints
+// Stricter limit for generation
 const generateRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 requests per minute
+  windowMs: 60 * 1000,
+  max: 10,
   message: { error: 'Too many generation requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -48,19 +48,19 @@ const generateRateLimiter = rateLimit({
 
 app.use(express.json({ limit: "50mb" }));
 
-// Helper to obtain Gemini client
+// Setup AI client
 let aiInstance: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   if (!aiInstance) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error("GEMINI_API_KEY environment variable is not configured. Please add it in the Secrets panel in Settings.");
+      throw new Error("Missing GEMINI_API_KEY in .env");
     }
     aiInstance = new GoogleGenAI({
       apiKey,
       httpOptions: {
         headers: {
-          "User-Agent": "aistudio-build",
+          "User-Agent": "noteflow-app",
         },
       },
     });
@@ -68,7 +68,7 @@ function getGeminiClient(): GoogleGenAI {
   return aiInstance;
 }
 
-// Unified AI generation function
+// Generate AI content
 async function generateAIContent({ systemInstruction, messages, temperature = 0.7 }: { systemInstruction: string, messages: { role: string, content: string }[], temperature?: number }) {
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   if (openRouterKey) {
@@ -109,7 +109,7 @@ async function generateAIContent({ systemInstruction, messages, temperature = 0.
   }));
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.5-flash",
+    model: "gemini-2.5-flash",
     contents,
     config: {
       systemInstruction,
@@ -120,39 +120,39 @@ async function generateAIContent({ systemInstruction, messages, temperature = 0.
   return response.text;
 }
 
-// Ensure clean status routing
+// Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", timestamp: new Date().toISOString() });
 });
 
-// Endpoint 1: Conversational Chat with Notes Context
-app.post("/api/ai/chat", aiRateLimiter, async (req, res): Promise<any> => {
+// Chat endpoint
+app.post("/api/ai/chat", aiRateLimiter, async (req, res) => {
   try {
     const { messages, systemContext } = req.body;
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "Messages array is required." });
     }
 
-    // Input validation - limit message count and length to prevent abuse
+    // Validate input
     if (messages.length > 50) {
-      return res.status(400).json({ error: "Maximum 50 messages allowed per request." });
+      return res.status(400).json({ error: "Too many messages (max 50)" });
     }
     
     for (const msg of messages) {
       if (!msg.content || typeof msg.content !== 'string') {
-        return res.status(400).json({ error: "Each message must have a string content." });
+        return res.status(400).json({ error: "Message must be a string" });
       }
       if (msg.content.length > 50000) {
-        return res.status(400).json({ error: "Message content exceeds maximum length of 50,000 characters." });
+        return res.status(400).json({ error: "Message too long (max 50k chars)" });
       }
     }
 
-    // Sanitize system context to prevent prompt injection
+    // Sanitize context
     const sanitizedContext = systemContext 
       ? String(systemContext).substring(0, 10000)
       : "";
 
-    const systemInstruction = `You are a helpful NoteFlow AI Assistant. Adhere to formatting guidelines, keep answers highly readable. Use the user's active notes context if relevant:\n\n${sanitizedContext}`;
+    const systemInstruction = `You are a helpful assistant. Use the user's active notes context if relevant:\n\n${sanitizedContext}`;
 
     const responseText = await generateAIContent({
       systemInstruction,
@@ -162,35 +162,32 @@ app.post("/api/ai/chat", aiRateLimiter, async (req, res): Promise<any> => {
 
     res.json({ content: responseText || "I was unable to formulate a response. Please try reframing your query." });
   } catch (err: any) {
-    console.error("Error in /api/ai/chat:", err);
-    // Don't expose internal error details to client
-    res.status(500).json({ error: "An error occurred processing your request. Please try again later." });
+    console.error("Error in chat endpoint:", err);
+    res.status(500).json({ error: "Something went wrong, please try again." });
   }
 });
 
-// Endpoint 2: Note-Taking Quick Actions (Summarize, Translate, Bulletify, Improve...)
-app.post("/api/ai/action", aiRateLimiter, async (req, res): Promise<any> => {
+// Action endpoint
+app.post("/api/ai/action", aiRateLimiter, async (req, res) => {
   try {
     const { action, text, instructions } = req.body;
     if (!text || !action) {
       return res.status(400).json({ error: "Text and action types are required." });
     }
 
-    // Input validation - limit text length to prevent abuse
+    // Validate input
     if (typeof text !== 'string') {
-      return res.status(400).json({ error: "Text must be a string." });
+      return res.status(400).json({ error: "Text must be a string" });
     }
     if (text.length > 100000) {
-      return res.status(400).json({ error: "Text exceeds maximum length of 100,000 characters." });
+      return res.status(400).json({ error: "Text too long (max 100k chars)" });
     }
     
-    // Validate action type
     const validActions = ["autotitle", "summarize", "improve", "expand", "simplify", "translate", "fix", "tone", "bullets", "headline", "todos", "questions"];
     if (!validActions.includes(action)) {
-      return res.status(400).json({ error: "Invalid action type." });
+      return res.status(400).json({ error: "Invalid action" });
     }
     
-    // Sanitize instructions to prevent prompt injection
     let sanitizedInstructions = "";
     if (instructions) {
       sanitizedInstructions = String(instructions).substring(0, 500);
@@ -251,41 +248,37 @@ app.post("/api/ai/action", aiRateLimiter, async (req, res): Promise<any> => {
 
     res.json({ result: responseText || "" });
   } catch (err: any) {
-    console.error("Error in /api/ai/action:", err);
-    // Don't expose internal error details to client
-    res.status(500).json({ error: "An error occurred processing the action. Please try again later." });
+    console.error("Error in action endpoint:", err);
+    res.status(500).json({ error: "Something went wrong with that action" });
   }
 });
 
-// Endpoint 3: Template & Outline Generator (Draft, Outlines, Ideas)
-app.post("/api/ai/generate", generateRateLimiter, async (req, res): Promise<any> => {
+// Generate endpoint
+app.post("/api/ai/generate", generateRateLimiter, async (req, res) => {
   try {
     const { type, prompt, noteContext } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: "Prompt/Goal is required." });
     }
 
-    // Input validation - limit prompt and context length
+    // Validate input
     if (typeof prompt !== 'string') {
-      return res.status(400).json({ error: "Prompt must be a string." });
+      return res.status(400).json({ error: "Prompt must be a string" });
     }
     if (prompt.length > 10000) {
-      return res.status(400).json({ error: "Prompt exceeds maximum length of 10,000 characters." });
+      return res.status(400).json({ error: "Prompt too long (max 10k chars)" });
     }
     
-    // Validate type parameter
     const validTypes = ["outline", "draft", "ideas", "continue"];
     if (type && !validTypes.includes(type)) {
-      return res.status(400).json({ error: "Invalid generation type." });
+      return res.status(400).json({ error: "Invalid type" });
     }
     
-    // Sanitize noteContext to prevent prompt injection
     let sanitizedContext = "";
     if (noteContext) {
       sanitizedContext = String(noteContext).substring(0, 20000);
     }
 
-    const generateInstruction = ""; // Defined below
     let actualInstruction = "";
     if (type === "outline") {
       actualInstruction = "Create a structured, detailed hierarchical markdown outline based on the prompt.";
@@ -309,31 +302,29 @@ app.post("/api/ai/generate", generateRateLimiter, async (req, res): Promise<any>
 
     res.json({ result: responseText || "" });
   } catch (err: any) {
-    console.error("Error in /api/ai/generate:", err);
-    // Don't expose internal error details to client
-    res.status(500).json({ error: "An error occurred generating the content. Please try again later." });
+    console.error("Error in generate endpoint:", err);
+    res.status(500).json({ error: "Something went wrong generating content" });
   }
 });
 
-// Vite server middleware integration or static files serving
+// Start server
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
+  if (process.env.NODE_ENV === "production") {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running in production mode on http://localhost:${PORT}`);
+    });
+  } else {
+    // Dev mode - Vite handles frontend, proxies API to Express
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`API server running on http://localhost:${PORT}`);
+      console.log(`Frontend dev server: http://localhost:5173`);
+    });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on http://localhost:${PORT}`);
-  });
 }
 
 startServer();
