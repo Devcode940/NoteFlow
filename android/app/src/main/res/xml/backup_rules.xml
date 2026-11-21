@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Room database + DataStore preferences are backed up with the app.
+     Auth tokens are managed by Firebase SDK storage and are excluded. -->
+<full-backup-content>
+    <include domain="database" path="noteflow.db" />
+    <include domain="file" path="datastore/" />
+    <exclude domain="sharedpref" path="com.google.firebase.auth" />
+</full-backup-content>
