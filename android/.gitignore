@@ -1,0 +1,15 @@
+# Android build outputs
+.gradle/
+*/build/
+build/
+*.iml
+.idea/
+local.properties
+
+# Secrets / signing (never commit)
+google-services.json
+keystore.properties
+*.jks
+*.keystore
+
+# Room schema exports are committed intentionally (see app/schemas).

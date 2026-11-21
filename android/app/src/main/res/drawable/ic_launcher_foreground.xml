@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NoteFlow launcher glyph: a flowing note with a spark (AI) accent. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,26 L74,26 Q80,26 80,32 L80,76 Q80,82 74,82 L34,82 Q28,82 28,76 L28,32 Q28,26 34,26 Z" />
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M38,40 L70,40 L70,45 L38,45 Z" />
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M38,52 L62,52 L62,57 L38,57 Z" />
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M38,64 L56,64 L56,69 L38,69 Z" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M78,18 L81,26 L89,29 L81,32 L78,40 L75,32 L67,29 L75,26 Z" />
+</vector>

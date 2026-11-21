@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exported files are staged here before being shared or saved via SAF. -->
+<paths>
+    <files-path name="exports" path="exports/" />
+    <cache-path name="exports_cache" path="exports/" />
+</paths>
