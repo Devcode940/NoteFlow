@@ -163,6 +163,7 @@ dependencies {
 
     // Unit tests
     testImplementation(libs.junit)
+    testImplementation(kotlin("test")) // kotlin.test assertions used by all JVM tests
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
     testImplementation(libs.room.testing)

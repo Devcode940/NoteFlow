@@ -2,6 +2,7 @@ package com.noteflow.ai.di
 
 import com.noteflow.ai.BuildConfig
 import com.noteflow.ai.data.remote.AiApi
+import com.noteflow.ai.data.remote.SupabaseApi
 import com.noteflow.ai.domain.repository.AiRepository
 import com.noteflow.ai.domain.repository.AuthRepository
 import com.noteflow.ai.domain.repository.FolderRepository
@@ -22,11 +23,11 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
-import okhttp3.MediaType.Companion.toMediaType
 import java.util.concurrent.TimeUnit
 import javax.inject.Named
 import javax.inject.Singleton
@@ -45,35 +46,44 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS) // AI generation can be slow
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .addInterceptor(
-            HttpLoggingInterceptor().apply {
-                level = if (BuildConfig.DEBUG) {
-                    HttpLoggingInterceptor.Level.BASIC
-                } else {
-                    HttpLoggingInterceptor.Level.NONE
+    fun provideOkHttpClient(backendUrlInterceptor: BackendUrlInterceptor): OkHttpClient =
+        OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS) // AI generation can be slow
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(backendUrlInterceptor)
+            .addInterceptor(
+                HttpLoggingInterceptor().apply {
+                    level = if (BuildConfig.DEBUG) {
+                        HttpLoggingInterceptor.Level.BASIC
+                    } else {
+                        HttpLoggingInterceptor.Level.NONE
+                    }
                 }
-            }
-        )
-        .build()
+            )
+            .build()
 
     @Provides
     @Singleton
-    fun provideAiApi(okHttpClient: OkHttpClient, json: Json): AiApi {
-        // Base URL is resolved per-request in AiRepositoryImpl from settings,
-        // but Retrofit needs a base URL at build time. Use the BuildConfig
-        // default; the repository rewrites streaming requests to the
-        // user-configured backend URL.
-        return Retrofit.Builder()
+    fun provideAiApi(okHttpClient: OkHttpClient, json: Json): AiApi =
+        Retrofit.Builder()
             .baseUrl(BuildConfig.BACKEND_URL)
             .client(okHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(AiApi::class.java)
-    }
+
+    @Provides
+    @Singleton
+    fun provideSupabaseApi(okHttpClient: OkHttpClient, json: Json): SupabaseApi =
+        Retrofit.Builder()
+            // Supabase is optional in local builds; syncNow refuses to run
+            // before this placeholder can ever be hit.
+            .baseUrl(BuildConfig.SUPABASE_URL.ifBlank { "https://supabase.invalid/" })
+            .client(okHttpClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(SupabaseApi::class.java)
 
     @Provides
     @Named("io")

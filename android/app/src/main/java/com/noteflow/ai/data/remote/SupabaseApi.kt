@@ -11,7 +11,7 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 
 /**
- * Supabase PostgREST DTOs. Tables (see /supabase-schema.sql):
+ * Supabase PostgREST DTOs. Column names map to supabase-schema.sql:
  *  - notes(id, user_id, title, content, folder_id, tags[], pinned, favorite,
  *          archived, trashed, created_at, updated_at)
  *  - folders(id, user_id, name, icon, color, sort_order, created_at, updated_at)
@@ -40,7 +40,7 @@ data class SupabaseFolderDto(
     val id: String,
     @SerialName("user_id") val userId: String,
     val name: String,
-    val icon: String = "📁",
+    val icon: String = "\uD83D\uDCC1",
     val color: String = "#7c3aed",
     @SerialName("sort_order") val sortOrder: Long = 0L,
     @SerialName("created_at") val createdAt: Long,
@@ -52,6 +52,9 @@ data class SupabaseFolderDto(
  * `Authorization: Bearer <Firebase ID token>` identifies the user; Supabase
  * validates the JWT against the configured third-party auth provider and RLS
  * enforces ownership. See android/README.md for the Supabase auth setup.
+ *
+ * Fetch endpoints paginate via limit/offset (see SyncManager PAGE_SIZE) so
+ * large datasets never materialise in one response.
  */
 interface SupabaseApi {
 
@@ -68,7 +71,9 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String,
         @Header("Authorization") authorization: String,
         @Query("select") select: String = "*",
-        @Query("order") order: String = "updated_at.desc"
+        @Query("order") order: String = "updated_at.desc",
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null
     ): List<SupabaseNoteDto>
 
     @DELETE("rest/v1/notes")
@@ -91,7 +96,9 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String,
         @Header("Authorization") authorization: String,
         @Query("select") select: String = "*",
-        @Query("order") order: String = "sort_order.asc"
+        @Query("order") order: String = "sort_order.asc",
+        @Query("limit") limit: Int? = null,
+        @Query("offset") offset: Int? = null
     ): List<SupabaseFolderDto>
 
     @DELETE("rest/v1/folders")

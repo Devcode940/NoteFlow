@@ -16,6 +16,26 @@ object TextStats {
 
     fun countChars(text: String): Int = text.length
 
+    /** Aggregated statistics for a note's content (editor live stats bar). */
+    data class ContentStats(
+        val wordCount: Int,
+        val charCount: Int,
+        val readingTimeMinutes: Int,
+        val summary: String
+    )
+
+    /** Computes [ContentStats] for [text]. */
+    fun forContent(text: String): ContentStats {
+        val words = countWords(text)
+        val chars = countChars(text)
+        return ContentStats(
+            wordCount = words,
+            charCount = chars,
+            readingTimeMinutes = readingTimeMinutes(words),
+            summary = "$words words · $chars chars"
+        )
+    }
+
     /** Reading time in whole minutes at [wordsPerMinute]; 0 for empty text. */
     fun readingTimeMinutes(wordCount: Int, wordsPerMinute: Int = 200): Int {
         if (wordCount <= 0) return 0

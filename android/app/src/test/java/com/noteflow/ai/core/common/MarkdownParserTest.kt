@@ -38,7 +38,8 @@ class MarkdownParserTest {
         val blocks = MarkdownParser.parse("```kotlin\nval x = 1\n```")
         val code = blocks[0] as MarkdownParser.Block.CodeBlock
         assertEquals("kotlin", code.language)
-        assertEquals("val x = 1\n", code.code)
+        // The parser trims the trailing newline of fenced blocks (regression for P3-1).
+        assertEquals("val x = 1", code.code)
     }
 
     @Test

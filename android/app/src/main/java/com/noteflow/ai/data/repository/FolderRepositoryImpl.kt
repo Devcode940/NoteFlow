@@ -1,11 +1,15 @@
 package com.noteflow.ai.data.repository
 
+import androidx.room.withTransaction
+import com.noteflow.ai.core.common.Logger
 import com.noteflow.ai.core.common.Result
 import com.noteflow.ai.data.local.AppDatabase
 import com.noteflow.ai.data.local.FolderEntity
 import com.noteflow.ai.data.local.SyncQueueEntity
+import com.noteflow.ai.domain.SyncMerge
 import com.noteflow.ai.domain.model.Folder
 import com.noteflow.ai.domain.repository.FolderRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -44,24 +48,30 @@ class FolderRepositoryImpl @Inject constructor(
                 createdAt = now,
                 updatedAt = now
             )
-            folderDao.upsert(FolderEntity.fromDomain(folder))
-            enqueueSync(folder.id, "upsert")
+            db.withTransaction {
+                folderDao.upsert(FolderEntity.fromDomain(folder))
+                enqueueSync(folder.id, "upsert")
+            }
             folder
         }
 
     override suspend fun updateFolder(folder: Folder): Result<Unit> = runCatchingIo {
-        folderDao.upsert(
-            FolderEntity.fromDomain(folder.copy(updatedAt = System.currentTimeMillis()))
-        )
-        enqueueSync(folder.id, "upsert")
+        db.withTransaction {
+            folderDao.upsert(
+                FolderEntity.fromDomain(folder.copy(updatedAt = System.currentTimeMillis()))
+            )
+            enqueueSync(folder.id, "upsert")
+        }
         Unit
     }
 
     override suspend fun deleteFolder(id: String): Result<Unit> = runCatchingIo {
         // Notes in the deleted folder become unfiled rather than deleted.
-        noteDao.unfileFolder(id)
-        folderDao.deleteById(id)
-        enqueueSync(id, "delete")
+        db.withTransaction {
+            noteDao.unfileFolder(id)
+            folderDao.deleteById(id)
+            enqueueSync(id, "delete")
+        }
         Unit
     }
 
@@ -69,7 +79,12 @@ class FolderRepositoryImpl @Inject constructor(
         folderDao.getById(id)?.toDomain()
     }
 
+    /** Applies a remote folder; last-write-wins, local wins ties. */
     override suspend fun applyRemoteFolder(folder: Folder): Result<Unit> = runCatchingIo {
+        val local = folderDao.getById(folder.id)
+        if (local != null && !SyncMerge.shouldApplyRemote(local.updatedAt, folder.updatedAt)) {
+            return@runCatchingIo
+        }
         folderDao.upsert(FolderEntity.fromDomain(folder))
         Unit
     }
@@ -89,8 +104,15 @@ class FolderRepositoryImpl @Inject constructor(
         withContext(ioDispatcher) {
             try {
                 Result.Success(block())
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Result.Failure("Folder operation failed: ${e.message}", e)
+                Logger.w(TAG, "Folder operation failed", e)
+                Result.Failure("Could not update folders. Please try again.", e)
             }
         }
+
+    companion object {
+        private const val TAG = "FolderRepository"
+    }
 }

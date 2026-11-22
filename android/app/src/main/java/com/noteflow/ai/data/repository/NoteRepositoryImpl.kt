@@ -1,10 +1,13 @@
 package com.noteflow.ai.data.repository
 
+import androidx.room.withTransaction
+import com.noteflow.ai.core.common.Logger
 import com.noteflow.ai.core.common.Result
 import com.noteflow.ai.core.common.TextStats
 import com.noteflow.ai.data.local.AppDatabase
 import com.noteflow.ai.data.local.NoteEntity
 import com.noteflow.ai.data.local.SyncQueueEntity
+import com.noteflow.ai.domain.SyncMerge
 import com.noteflow.ai.domain.model.Note
 import com.noteflow.ai.domain.model.NoteFilter
 import com.noteflow.ai.domain.model.NoteFilterType
@@ -12,10 +15,11 @@ import com.noteflow.ai.domain.model.SortBy
 import com.noteflow.ai.domain.model.SortOrder
 import com.noteflow.ai.domain.model.SyncState
 import com.noteflow.ai.domain.repository.NoteRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -26,8 +30,10 @@ import javax.inject.Singleton
 
 /**
  * Room-backed note repository. Room is the primary source of truth; every
- * mutation also enqueues a sync operation so changes survive offline use and
- * are pushed later by SyncManager. No database work happens on the main thread.
+ * mutation atomically updates the row, its tags and the sync outbox inside
+ * one Room transaction (P2-1 fix), so a process death can never leave the
+ * note updated while the sync entry is missing. No database work happens on
+ * the main thread.
  */
 @Singleton
 class NoteRepositoryImpl @Inject constructor(
@@ -39,6 +45,11 @@ class NoteRepositoryImpl @Inject constructor(
     private val tagDao = db.noteTagDao()
     private val syncQueueDao = db.syncQueueDao()
 
+    /**
+     * Reactive note list. Search composes WITH the active filter (P2-4 fix):
+     * the ALL filter searches in SQL, every other filter searches within the
+     * filtered set, so e.g. "search inside Favorites" works.
+     */
     override fun observeNotes(
         filter: NoteFilter,
         sortBy: SortBy,
@@ -55,12 +66,13 @@ class NoteRepositoryImpl @Inject constructor(
             NoteFilterType.FOLDER -> noteDao.observeByFolder(filter.folderId.orEmpty())
             NoteFilterType.TAG -> noteDao.observeByTag(filter.tag.orEmpty())
         }
-        val searched = if (query.isBlank()) {
-            entities
-        } else {
-            noteDao.observeSearch(escapeLike(query.trim()))
+        val trimmed = query.trim()
+        val effective: Flow<List<NoteEntity>> = when {
+            trimmed.isEmpty() -> entities
+            filter.type == NoteFilterType.ALL -> noteDao.observeSearch(escapeLike(trimmed))
+            else -> entities.map { list -> list.filter { matches(it, trimmed) } }
         }
-        return searched
+        return effective
             .map { list -> list.map { it.toDomain() } }
             .map { notes -> attachTags(notes) }
             .map { notes -> sortNotes(notes, sortBy, sortOrder) }
@@ -100,8 +112,10 @@ class NoteRepositoryImpl @Inject constructor(
                 charCount = TextStats.countChars(content),
                 syncState = SyncState.PENDING
             )
-            noteDao.upsert(NoteEntity.fromDomain(note))
-            enqueueSync("note", note.id, "upsert")
+            db.withTransaction {
+                noteDao.upsert(NoteEntity.fromDomain(note))
+                enqueueSync("note", note.id, "upsert")
+            }
             note
         }
 
@@ -112,23 +126,27 @@ class NoteRepositoryImpl @Inject constructor(
             charCount = TextStats.countChars(note.content),
             syncState = SyncState.PENDING
         )
-        noteDao.upsert(NoteEntity.fromDomain(updated))
-        tagDao.replaceTags(updated.id, normalizeTags(updated.tags))
-        enqueueSync("note", updated.id, "upsert")
+        db.withTransaction {
+            noteDao.upsert(NoteEntity.fromDomain(updated))
+            tagDao.replaceTags(updated.id, normalizeTags(updated.tags))
+            enqueueSync("note", updated.id, "upsert")
+        }
         Unit
     }
 
     override suspend fun updateContent(id: String, title: String, content: String): Result<Unit> =
         runCatchingIo {
-            noteDao.updateContent(
-                id = id,
-                title = title,
-                content = content,
-                updatedAt = System.currentTimeMillis(),
-                wordCount = TextStats.countWords(content),
-                charCount = TextStats.countChars(content)
-            )
-            enqueueSync("note", id, "upsert")
+            db.withTransaction {
+                noteDao.updateContent(
+                    id = id,
+                    title = title,
+                    content = content,
+                    updatedAt = System.currentTimeMillis(),
+                    wordCount = TextStats.countWords(content),
+                    charCount = TextStats.countChars(content)
+                )
+                enqueueSync("note", id, "upsert")
+            }
             Unit
         }
 
@@ -157,8 +175,10 @@ class NoteRepositoryImpl @Inject constructor(
     }
 
     override suspend fun setTags(id: String, tags: List<String>): Result<Unit> = runCatchingIo {
-        tagDao.replaceTags(id, normalizeTags(tags))
-        enqueueSync("note", id, "upsert")
+        db.withTransaction {
+            tagDao.replaceTags(id, normalizeTags(tags))
+            enqueueSync("note", id, "upsert")
+        }
         Unit
     }
 
@@ -180,8 +200,10 @@ class NoteRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteNotePermanently(id: String): Result<Unit> = runCatchingIo {
-        noteDao.deleteById(id)
-        enqueueSync("note", id, "delete")
+        db.withTransaction {
+            noteDao.deleteById(id)
+            enqueueSync("note", id, "delete")
+        }
         Unit
     }
 
@@ -197,17 +219,17 @@ class NoteRepositoryImpl @Inject constructor(
             syncState = SyncState.PENDING.name,
             lastSyncedAt = null
         )
-        noteDao.upsert(copy)
-        tagDao.replaceTags(copy.id, tagDao.getTagsForNote(id))
-        enqueueSync("note", copy.id, "upsert")
-        copy.toDomain(tagDao.getTagsForNote(copy.id))
+        val copyTags = tagDao.getTagsForNote(id)
+        db.withTransaction {
+            noteDao.upsert(copy)
+            tagDao.replaceTags(copy.id, copyTags)
+            enqueueSync("note", copy.id, "upsert")
+        }
+        copy.toDomain(copyTags)
     }
 
     override suspend fun searchNotes(query: String): Result<List<Note>> = runCatchingIo {
-        val entities = noteDao.observeSearch(escapeLike(query)).let { flow ->
-            // One-shot read: collect the first emission from the search flow.
-            kotlinx.coroutines.flow.first(flow)
-        }
+        val entities = noteDao.observeSearch(escapeLike(query.trim())).first()
         attachTags(entities.map { it.toDomain() })
     }
 
@@ -219,10 +241,24 @@ class NoteRepositoryImpl @Inject constructor(
         if (ids.isEmpty()) emptyList() else attachTags(noteDao.getByIds(ids).map { it.toDomain() })
     }
 
+    /**
+     * Applies a remote note. Enforces last-write-wins here as well as in
+     * SyncManager (defense in depth): a caller can no longer clobber newer
+     * local data by accident.
+     */
     override suspend fun applyRemoteNote(note: Note): Result<Unit> = runCatchingIo {
-        noteDao.upsert(NoteEntity.fromDomain(note.copy(syncState = SyncState.SYNCED)))
-        tagDao.replaceTags(note.id, normalizeTags(note.tags))
-        Unit
+        val local = noteDao.getById(note.id)
+        if (local != null && !SyncMerge.shouldApplyRemote(local.updatedAt, note.updatedAt)) {
+            return@runCatchingIo
+        }
+        db.withTransaction {
+            noteDao.upsert(
+                NoteEntity.fromDomain(
+                    note.copy(syncState = SyncState.SYNCED, lastSyncedAt = System.currentTimeMillis())
+                )
+            )
+            tagDao.replaceTags(note.id, normalizeTags(note.tags))
+        }
     }
 
     override suspend fun markSynced(id: String, syncedAt: Long): Result<Unit> = runCatchingIo {
@@ -257,6 +293,10 @@ class NoteRepositoryImpl @Inject constructor(
         return ordered.sortedByDescending { it.pinned }
     }
 
+    private fun matches(entity: NoteEntity, query: String): Boolean =
+        entity.title.contains(query, ignoreCase = true) ||
+            entity.content.contains(query, ignoreCase = true)
+
     private fun normalizeTags(tags: List<String>): List<String> =
         tags.map { it.trim().lowercase() }
             .filter { it.isNotEmpty() }
@@ -277,16 +317,26 @@ class NoteRepositoryImpl @Inject constructor(
         )
     }
 
+    /**
+     * Runs [block] on the IO dispatcher and converts failures into
+     * [Result.Failure]. Cancellation is never swallowed (it is rethrown so
+     * structured cancellation keeps working), and the user-facing message
+     * never contains raw exception text.
+     */
     private suspend fun <T> runCatchingIo(block: suspend () -> T): Result<T> =
         withContext(ioDispatcher) {
             try {
                 Result.Success(block())
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Result.Failure("Database operation failed: ${e.message}", e)
+                Logger.w(TAG, "Database operation failed", e)
+                Result.Failure("Could not update notes. Please try again.", e)
             }
         }
 
     companion object {
+        private const val TAG = "NoteRepository"
         private const val RECENT_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
         private const val MAX_TAGS_PER_NOTE = 20
     }

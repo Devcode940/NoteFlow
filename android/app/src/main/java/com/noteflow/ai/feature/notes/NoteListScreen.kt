@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AssistChip
@@ -51,7 +53,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +62,6 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.ctrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,7 +72,6 @@ import com.noteflow.ai.domain.model.NoteFilterType
 import com.noteflow.ai.domain.model.SortBy
 import com.noteflow.ai.domain.model.SortOrder
 import com.noteflow.ai.domain.model.SyncState
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -91,19 +90,17 @@ fun NoteListScreen(
     val state by viewModel.uiState.collectAsState()
     val notes by viewModel.visibleNotes.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
     val searchFocus = remember { FocusRequester() }
-    var lastTrashed by remember { mutableStateOf<Note?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
         val result = snackbarHostState.showSnackbar(
             message = message,
-            actionLabel = if (message == "Note moved to trash") "Undo" else null
+            actionLabel = if (state.canUndo) "Undo" else null
         )
         if (result == SnackbarResult.ActionPerformed) {
-            lastTrashed?.let { viewModel.restore(it) }
+            viewModel.undoTrash()
         }
         viewModel.consumeMessage()
     }
@@ -186,9 +183,8 @@ fun NoteListScreen(
                     Text("${state.selectedIds.size} selected", style = MaterialTheme.typography.titleMedium)
                     Row {
                         TextButton(onClick = {
-                            state.selectedIds.forEach { id ->
-                                notes.firstOrNull { it.id == id }?.let { viewModel.trash(it) }
-                            }
+                            val selected = notes.filter { state.selectedIds.contains(it.id) }
+                            viewModel.trashAll(selected)
                             viewModel.clearSelection()
                         }) {
                             Text("Move to trash")
@@ -201,15 +197,6 @@ fun NoteListScreen(
             when {
                 state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
-                }
-                state.error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(state.error!!, color = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = { /* Room flows retry automatically */ }) {
-                            Text("Dismiss")
-                        }
-                    }
                 }
                 notes.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -230,58 +217,25 @@ fun NoteListScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(notes, key = { it.id }) { note ->
-                        val dismissState = rememberSwipeToDismissBoxState(
-                            confirmValueChange = { value ->
-                                if (value == SwipeToDismissBoxValue.EndToStart) {
-                                    lastTrashed = note
-                                    viewModel.trash(note)
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
+                        NoteCard(
+                            note = note,
+                            syncState = state.syncStates[note.id],
+                            selected = state.selectedIds.contains(note.id),
+                            selectionMode = state.selectionMode,
+                            onClick = {
+                                if (state.selectionMode) viewModel.toggleSelection(note.id)
+                                else onOpenNote(note.id)
+                            },
+                            onLongClick = { viewModel.toggleSelection(note.id) },
+                            onTogglePin = { viewModel.togglePin(note) },
+                            onToggleFavorite = { viewModel.toggleFavorite(note) },
+                            onToggleArchive = { viewModel.toggleArchive(note) },
+                            onDuplicate = { viewModel.duplicate(note) },
+                            onTrash = { viewModel.trash(note) },
+                            onRestore = { viewModel.restore(note) },
+                            onDeletePermanently = { viewModel.deletePermanently(note) },
+                            onOpenTag = onOpenTag
                         )
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            enableDismissFromStartToEnd = false,
-                            backgroundContent = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 16.dp),
-                                    contentAlignment = Alignment.CenterEnd
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Delete,
-                                        contentDescription = "Move to trash",
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            }
-                        ) {
-                            NoteCard(
-                                note = note,
-                                syncState = state.syncStates[note.id],
-                                selected = state.selectedIds.contains(note.id),
-                                selectionMode = state.selectionMode,
-                                onClick = {
-                                    if (state.selectionMode) viewModel.toggleSelection(note.id)
-                                    else onOpenNote(note.id)
-                                },
-                                onLongClick = { viewModel.toggleSelection(note.id) },
-                                onTogglePin = { viewModel.togglePin(note) },
-                                onToggleFavorite = { viewModel.toggleFavorite(note) },
-                                onToggleArchive = { viewModel.toggleArchive(note) },
-                                onDuplicate = { viewModel.duplicate(note) },
-                                onTrash = {
-                                    lastTrashed = note
-                                    viewModel.trash(note)
-                                },
-                                onRestore = { viewModel.restore(note) },
-                                onDeletePermanently = { viewModel.deletePermanently(note) },
-                                onOpenTag = onOpenTag
-                            )
-                        }
                     }
                 }
             }
@@ -289,12 +243,7 @@ fun NoteListScreen(
     }
 }
 
-@Composable
-private fun SortOption(label: String, by: SortBy, order: SortOrder, onClick: () -> Unit) {
-    DropdownMenuItem(text = { Text(label) }, onClick = onClick)
-}
-
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun NoteCard(
     note: Note,
@@ -314,7 +263,35 @@ private fun NoteCard(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
-    Card(
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onTrash()
+                true
+            } else {
+                false
+            }
+        }
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "Move to trash",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    ) {
+        Card(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
@@ -330,7 +307,7 @@ private fun NoteCard(
             if (selectionMode) {
                 Icon(
                     if (selected) Icons.Filled.RadioButtonChecked else Icons.Filled.RadioButtonUnchecked,
-                    contentDescription = null,
+                    contentDescription = if (selected) "Selected" else "Not selected",
                     modifier = Modifier.padding(end = 8.dp)
                 )
             }
@@ -423,6 +400,7 @@ private fun NoteCard(
                 }
             }
         }
+    }
     }
 }
 

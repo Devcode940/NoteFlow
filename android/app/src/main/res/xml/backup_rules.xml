@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Room database + DataStore preferences are backed up with the app.
-     Auth tokens are managed by Firebase SDK storage and are excluded. -->
+<!-- Cloud backup intentionally EXCLUDES the Room database (P2-17 fix):
+     restoring another device's database onto a fresh install before the
+     user signs in would surface notes that were not created on this device.
+     Preferences (theme, settings) are backed up — they are non-sensitive.
+     Firebase auth state is excluded; Firebase manages its own storage. -->
 <full-backup-content>
-    <include domain="database" path="noteflow.db" />
+    <exclude domain="database" path="noteflow.db" />
+    <exclude domain="database" path="noteflow.db-wal" />
+    <exclude domain="database" path="noteflow.db-shm" />
     <include domain="file" path="datastore/" />
     <exclude domain="sharedpref" path="com.google.firebase.auth" />
 </full-backup-content>

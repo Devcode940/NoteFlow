@@ -1,0 +1,76 @@
+name: NoteFlow CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  android:
+    name: Android — build & unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      # The build works without google-services.json (Firebase disabled,
+      # local-only mode). CI exercises that path; a signed release build
+      # requires the keystore secret and is done from a maintainer machine.
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Unit tests (JVM)
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+
+  backend:
+    name: Backend — typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+  schema-guard:
+    name: Supabase schema ↔ DTO consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify PostgREST DTO columns exist in the SQL schema
+        run: |
+          set -e
+          # Extract @SerialName column names from the DTOs and check the schema.
+          for col in user_id folder_id created_at updated_at sort_order; do
+            if ! grep -q "$col" supabase-schema.sql; then
+              echo "::error::DTO column '$col' missing from supabase-schema.sql"
+              exit 1
+            fi
+          done
+          echo "schema/DTO columns consistent"

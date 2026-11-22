@@ -5,8 +5,6 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import androidx.room.TypeConverter
-import androidx.room.TypeConverters
 import com.noteflow.ai.domain.model.Folder
 import com.noteflow.ai.domain.model.Note
 import com.noteflow.ai.domain.model.SyncState
@@ -142,16 +140,3 @@ data class SyncQueueEntity(
     val operation: String, // "upsert" | "delete"
     val enqueuedAt: Long
 )
-
-class Converters {
-    @TypeConverter
-    fun fromStringList(value: List<String>): String = value.joinToString(SEPARATOR)
-
-    @TypeConverter
-    fun toStringList(value: String): List<String> =
-        if (value.isBlank()) emptyList() else value.split(SEPARATOR)
-
-    companion object {
-        private const val SEPARATOR = "\u001F"
-    }
-}

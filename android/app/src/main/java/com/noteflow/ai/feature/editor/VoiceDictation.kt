@@ -83,7 +83,7 @@ class VoiceDictation(private val context: Context) {
             speechRecognizer.startListening(intent)
             true
         } catch (e: Exception) {
-            listener.onError("Could not start speech recognition: ${e.message}")
+            listener.onError("Could not start speech recognition on this device.")
             destroy()
             false
         }

@@ -1,6 +1,6 @@
 package com.noteflow.ai.feature.ai
 
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,44 +10,53 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.GridCells
-import androidx.compose.foundation.lazy.LazyGrid
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.noteflow.ai.domain.model.AiGeneratorType
-import com.noteflow.ai.domain.model.AiQuickAction
+import com.noteflow.ai.domain.model.AiMessage
 import com.noteflow.ai.domain.model.AiRole
-import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/**
+ * AI assistant. Quick actions and generators operate on the text box content
+ * (or the typed prompt for generators); the result is written back into the
+ * text box so it can be inserted into a note or continued as a conversation.
+ * The host NavHost provides the screen title bar.
+ */
 @Composable
 fun AiAssistantScreen(
     onOpenNote: (String) -> Unit,
@@ -56,211 +65,177 @@ fun AiAssistantScreen(
     val messages by viewModel.messages.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
     val error by viewModel.error.collectAsState()
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val aiModel by viewModel.aiModel.collectAsState()
+    val isSignedIn by viewModel.isSignedIn.collectAsState()
+    val clipboard = LocalClipboardManager.current
     var input by remember { mutableStateOf("") }
-    var noteContext by remember { mutableStateOf<String?>(null) }
-    val inputFocus = remember { FocusRequester() }
 
-    val model = "gemini-2.5-flash"
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("AI Assistant") },
-                navigationIcon = {
-                    IconButton(onClick = { /* drawer handled by host */ }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                }
+    val send = {
+        val message = input.trim()
+        if (message.isNotBlank() && !isGenerating) {
+            input = ""
+            viewModel.addUserMessage(message)
+            viewModel.streamReply(
+                noteContext = null,
+                model = aiModel,
+                onComplete = { }
             )
         }
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // Context chip
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Context: ${if (noteContext != null) "Selected note" else "None"}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+        Unit
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        if (!isSignedIn) {
+            Text(
+                text = "Sign in (Profile) to enable AI features.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
+
+        // Quick actions: apply an AI transform to the text box content.
+        Text("Quick actions", style = MaterialTheme.typography.titleSmall)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(viewModel.quickActions, key = { it.key }) { action ->
+                AssistChip(
+                    onClick = {
+                        viewModel.runQuickAction(
+                            action = action,
+                            text = input,
+                            instructions = null,
+                            model = aiModel,
+                            onResult = { input = it }
+                        )
+                    },
+                    label = { Text(action.label, maxLines = 1) }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                TextButton(onClick = { noteContext = null }) { Text("Clear") }
             }
+        }
 
-            // Quick actions grid
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Quick actions", style = MaterialTheme.typography.titleSmall)
-                LazyGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(viewModel.quickActions, key = { it.key }) { action ->
-                        ActionChip(
-                            label = action.label,
-                            onClick = {
-                                val text = noteContext ?: ""
-                                if (text.isBlank()) {
-                                    viewModel.setError( "Open a note first to use quick actions"
-                                } else {
-                                    viewModel.runQuickAction(
-                                        action = action,
-                                        text = text,
-                                        instructions = null,
-                                        model = model,
-                                        onResult = { input = it }
-                                    )
-                                }
-                            }
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Generators: produce content from the text box as the prompt.
+        Text("Generators", style = MaterialTheme.typography.titleSmall)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(viewModel.generators, key = { it.key }) { gen ->
+                AssistChip(
+                    onClick = {
+                        viewModel.generate(
+                            type = gen,
+                            prompt = input,
+                            noteContext = null,
+                            model = aiModel,
+                            onResult = { input = it }
                         )
-                    }
-                }
+                    },
+                    label = { Text(gen.label, maxLines = 1) }
+                )
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            // Generators
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Generators", style = MaterialTheme.typography.titleSmall)
-                LazyGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(viewModel.generators, key = { it.key }) { gen ->
-                        ActionChip(
-                            label = gen.label,
-                            onClick = {
-                                val text = noteContext ?: ""
-                                if (text.isBlank()) {
-                                    viewModel.setError( "Open a note first to use generators"
-                                } else {
-                                    viewModel.generate(
-                                        type = gen,
-                                        prompt = text,
-                                        noteContext = null,
-                                        model = model,
-                                        onResult = { input = it }
-                                    )
-                                }
-                            }
-                        )
-                    }
+        // Conversation (LazyColumn: recomposes only new rows while streaming — P2-3 fix).
+        val listState = rememberLazyListState()
+        LaunchedEffect(messages.size) {
+            if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (messages.isEmpty() && !isGenerating) {
+                item {
+                    Text(
+                        text = "Ask anything, or use a quick action on your text above.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Conversation
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                if (messages.isEmpty() && !isGenerating) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "Start a conversation with the AI assistant.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                messages.forEach { message ->
-                    AiMessageRow(
-                        message = message,
-                        onCopy = { /* clipboard via host */ },
-                        onInsert = { /* insert via host */ }
-                    }
-                }
-                if (isGenerating) {
+            items(messages, key = { it.id }) { message ->
+                AiMessageRow(
+                    message = message,
+                    onCopy = { clipboard.setText(AnnotatedString(message.content)) },
+                    onInsert = { input = input + message.content }
+                )
+            }
+            if (isGenerating) {
+                item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator()
+                        CircularProgressIndicator(modifier = Modifier.height(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Generating…", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                error?.let {
+            }
+            error?.let { message ->
+                item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Icon(
+                            Icons.Default.Error,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = it,
+                            text = message,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
                     }
+                    TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            // Input
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                androidx.compose.material3.OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    placeholder = { Text("Ask the AI assistant…") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f).focusRequester(inputFocus),
-                    keyboardOptions = androidx.compose.ui.text.input.KeyboardOptions(
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Send
-                    ),
-                    onKeyboardAction = { if (input.isNotBlank()) send() }
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(onClick = { send() }) {
-                    Icon(Icons.Default.Send, contentDescription = "Send")
-                }
-                if (isGenerating) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(onClick = { viewModel.cancel() }) {
-                        Icon(Icons.Default.Cancel, contentDescription = "Cancel")
-                    }
+        // Input
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                placeholder = { Text("Type a message or text to transform…") },
+                singleLine = false,
+                maxLines = 4,
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { send() })
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(onClick = { send() }, enabled = !isGenerating) {
+                Icon(Icons.Default.Send, contentDescription = "Send")
+            }
+            if (isGenerating) {
+                IconButton(onClick = { viewModel.cancel() }) {
+                    Icon(Icons.Default.Cancel, contentDescription = "Cancel generation")
                 }
             }
         }
     }
-
-    // Handle async error display (StateFlow updates outside recomposition).
-    LaunchedEffect(error) {
-        // error is already displayed inline via collectAsState above.
-    }
-
-    // Keyboard shortcut: Ctrl+Enter to send.
-    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-        // handled by host's onPreviewKeyEvent if needed
-    }
-}
-
-private fun AiAssistantScreen.send() {
-    val message = input.trim()
-    if (message.isBlank()) return
-    input = ""
-    viewModel.addUserMessage(message)
-    viewModel.streamReply(
-        noteContext = null,
-        model = "gemini-2.5-flash",
-        onComplete = { /* reply complete */ }
-    )
 }
 
 @Composable
 private fun AiMessageRow(
-    message: com.noteflow.ai.domain.model.AiMessage,
+    message: AiMessage,
     onCopy: () -> Unit,
     onInsert: () -> Unit
 ) {
@@ -274,35 +249,27 @@ private fun AiMessageRow(
                 .widthIn(max = 600.dp)
                 .background(
                     if (isUser) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerLow
+                    else MaterialTheme.colorScheme.surfaceContainerLow,
+                    RoundedCornerShape(12.dp)
                 )
                 .padding(12.dp)
         ) {
             Text(
-                text = message.content,
+                text = message.content.ifBlank { "…" },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            if (!isUser) {
+            if (!isUser && message.content.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.End) {
                     IconButton(onClick = onCopy) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy reply")
                     }
                     IconButton(onClick = onInsert) {
-                        Icon(Icons.Default.ContentPaste, contentDescription = "Insert into note")
+                        Icon(Icons.Default.ContentPaste, contentDescription = "Insert into text box")
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun ActionChip(label: String, onClick: () -> Unit) {
-    androidx.compose.material3.Chip(
-        onClick = onClick,
-        label = { Text(label) },
-        modifier = Modifier.fillMaxWidth()
-    )
 }

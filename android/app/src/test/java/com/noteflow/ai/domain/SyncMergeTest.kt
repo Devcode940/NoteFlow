@@ -2,47 +2,49 @@ package com.noteflow.ai.domain
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import com.noteflow.ai.domain.model.Note
 import com.noteflow.ai.domain.model.SyncState
-import java.util.Date
 
+/**
+ * Regression tests for the last-write-wins conflict rule (SyncMerge).
+ * Note construction uses the full required parameters (createdAt/updatedAt
+ * have no defaults) — the previous version of this file did not compile.
+ */
 class SyncMergeTest {
+
+    private fun note(updatedAt: Long, title: String = "local"): Note = Note(
+        id = "1",
+        title = title,
+        content = "$title content",
+        folderId = null,
+        tags = emptyList(),
+        createdAt = 0,
+        updatedAt = updatedAt
+    )
 
     @Test
     fun remoteWinsWhenStrictlyNewer() {
-        val local = Note("1", "local", "local content", null, emptyList(),
-            updatedAt = 1000)
-        val remote = Note("1", "remote", "remote content", null, emptyList(),
-            updatedAt = 2000)
-        val merged = SyncMerge.merge(local, remote)
-        assertEquals("remote content", merged.content)
-        assertEquals("remote", merged.title)
+        assertTrue(SyncMerge.shouldApplyRemote(localUpdatedAt = 1000, remoteUpdatedAt = 2000))
+        assertFalse(SyncMerge.shouldPushLocal(localUpdatedAt = 1000, remoteUpdatedAt = 2000))
     }
 
     @Test
     fun localWinsOnTie() {
-        val local = Note("1", "local", "local content", null, emptyList(),
-            updatedAt = 1000)
-        val remote = Note("1", "remote", "remote content", null, emptyList(),
-            updatedAt = 1000)
-        val merged = SyncMerge.merge(local, remote)
-        assertEquals("local content", merged.content)
-        assertEquals("local", merged.title)
+        assertFalse(SyncMerge.shouldApplyRemote(localUpdatedAt = 1000, remoteUpdatedAt = 1000))
+        assertTrue(SyncMerge.shouldPushLocal(localUpdatedAt = 1000, remoteUpdatedAt = 1000))
     }
 
     @Test
     fun localWinsWhenOlderRemote() {
-        val local = Note("1", "local", "local content", null, emptyList(),
-            updatedAt = 2000)
-        val remote = Note("1", "remote", "remote content", null, emptyList(),
-            updatedAt = 1000)
-        val merged = SyncMerge.merge(local, remote)
-        assertEquals("local content", merged.content)
+        assertFalse(SyncMerge.shouldApplyRemote(localUpdatedAt = 2000, remoteUpdatedAt = 1000))
+        assertTrue(SyncMerge.shouldPushLocal(localUpdatedAt = 2000, remoteUpdatedAt = 1000))
     }
 
     @Test
-    fun syncStateDefaults() {
-        val note = Note("1", "t", "c", null, emptyList())
-        assertEquals(SyncState.LOCAL_ONLY, note.syncState)
+    fun syncStateDefaultsToLocalOnly() {
+        val n = note(updatedAt = 100)
+        assertEquals(SyncState.LOCAL_ONLY, n.syncState)
     }
 }

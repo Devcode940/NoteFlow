@@ -20,14 +20,18 @@ object Routes {
 
     fun editor(noteId: String): String = "editor/$noteId"
 
-    fun notes(filter: NoteFilterType, folderId: String? = null, tag: String? = null): String {
-        val base = "$NOTES/${filter.name}"
-        return when (filter) {
-            NoteFilterType.FOLDER -> "$base/${folderId.orEmpty()}"
-            NoteFilterType.TAG -> "$base/${tag.orEmpty()}"
-            else -> base
+    /**
+     * Builds a note-list route. {arg} is an OPTIONAL query argument so the
+     * plain filters ("notes/ALL", "notes/FAVORITES", ...) match the same
+     * composable as folder/tag routes (P0-1 fix — the previous pattern
+     * required three segments and crashed the NavHost on cold start).
+     */
+    fun notes(filter: NoteFilterType, folderId: String? = null, tag: String? = null): String =
+        when (filter) {
+            NoteFilterType.FOLDER -> "$NOTES/${filter.name}?arg=${folderId.orEmpty()}"
+            NoteFilterType.TAG -> "$NOTES/${filter.name}?arg=${tag.orEmpty()}"
+            else -> "$NOTES/${filter.name}"
         }
-    }
 
-    const val NOTES_PATTERN = "notes/{filter}/{arg}"
+    const val NOTES_PATTERN = "notes/{filter}?arg={arg}"
 }

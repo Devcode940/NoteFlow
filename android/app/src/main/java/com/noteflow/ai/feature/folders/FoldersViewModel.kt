@@ -10,6 +10,8 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -22,9 +24,10 @@ class FoldersViewModel @Inject constructor(
     val message: StateFlow<String?> = _message.asStateFlow()
 
     val uiState: StateFlow<FoldersUiState> = combine(
-        folderRepository.observeFolders()
-    ) { folders ->
-        FoldersUiState(folders = folders, message = _message.value)
+        folderRepository.observeFolders(),
+        _message
+    ) { folders, msg ->
+        FoldersUiState(folders = folders, message = msg)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FoldersUiState())
 
     fun createFolder(name: String, icon: String, colorHex: String) {

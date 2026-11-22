@@ -1,196 +1,411 @@
 package com.noteflow.ai.feature.settings
 
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonContainer
-import androidx.compose.material3.SegmentedButtonGroup
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.noteflow.ai.domain.model.AppSettings
 import com.noteflow.ai.domain.model.EditorMode
 import com.noteflow.ai.domain.model.ExportFormat
 import com.noteflow.ai.domain.model.ThemeMode
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/**
+ * Settings. The host NavHost provides the screen title bar; every picker is
+ * a real, working dialog (no dead menu entries).
+ */
 @Composable
 fun SettingsScreen(
     onOpenSignIn: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    var showDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var showEditorModePicker by remember { mutableStateOf(false) }
+    var showWordGoalPicker by remember { mutableStateOf(false) }
+    var showModelPicker by remember { mutableStateOf(false) }
+    var showBackendUrlPicker by remember { mutableStateOf(false) }
+    var showFormatPicker by remember { mutableStateOf(false) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.message) {
+        val message = state.message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.consumeMessage()
+    }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
     ) {
-        androidx.compose.material3.TopAppBar(
-            title = { Text("Settings") },
-            navigationIcon = {
-                IconButton(onClick = { /* handled by host */ }) {
-                    Icon(ArrowBack, contentDescription = "Back")
-                }
-            }
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        SnackbarHost(snackbarHostState)
 
-        // Account
-        Text("Account", style = MaterialTheme.typography.titleMedium)
-        ListItem(
-            headline = { Text("Sign in / Sign out") },
-            leadingIcon = {
+        SectionTitle("Account")
+        SettingsItem(
+            headline = if (state.isSignedIn) "Sign out" else "Sign in",
+            supporting = state.userEmail,
+            leading = {
                 Icon(
-                    if (state.isSignedIn) Icons.Default.PowerSettingsNew else Icons.Default.Login,
+                    if (state.isSignedIn) Icons.Default.Logout else Icons.Default.Person,
                     contentDescription = null
                 )
             },
-            onClick = {
-                if (state.isSignedIn) {
-                    viewModel.signOut()
-                } else {
-                    onOpenSignIn()
+            onClick = { if (state.isSignedIn) confirmSignOut = true else onOpenSignIn() }
+        )
+        SectionSpacer()
+
+        SectionTitle("Appearance")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            ThemeMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = state.settings.themeMode == mode,
+                    onClick = { viewModel.onThemeChange(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size)
+                ) {
+                    Text(mode.name.lowercase().replaceFirstChar { it.uppercase() })
                 }
             }
-        )
-        if (state.isSignedIn) {
-            ListItem(
-                headline = { Text(state.userEmail ?: "Signed in") },
-                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                enabled = false
-            )
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        SectionSpacer()
 
-        // Appearance
-        Text("Appearance", style = MaterialTheme.typography.titleMedium)
-        SegmentedButtonGroup(
-            selected = state.themeMode,
-            onValueChange = { viewModel.onThemeChange(it) }
-        ) {
-            SegmentedButton(
-                value = ThemeMode.LIGHT,
-                onClick = { viewModel.onThemeChange(ThemeMode.LIGHT) }
-            ) { Text("Light") }
-            SegmentedButton(
-                value = ThemeMode.DARK,
-                onClick = { viewModel.onThemeChange(ThemeMode.DARK) }
-            ) { Text("Dark") }
-            SegmentedButton(
-                value = ThemeMode.SYSTEM,
-                onClick = { viewModel.onThemeChange(ThemeMode.SYSTEM) }
-            ) { Text("System") }
-        }
-        Spacer(modifier = Modifier.height(16.dp))
+        SectionTitle("Editor")
+        SettingsItem(
+            headline = "Default mode",
+            supporting = state.settings.defaultEditorMode.name.lowercase(),
+            onClick = { showEditorModePicker = true }
+        )
+        ToggleItem(
+            headline = "Auto-save",
+            supporting = "Save edits automatically while typing",
+            checked = state.settings.autoSave,
+            onCheckedChange = viewModel::onAutoSaveChange
+        )
+        SettingsItem(
+            headline = "Word-count goal",
+            supporting = "${state.settings.wordGoal} words",
+            onClick = { showWordGoalPicker = true }
+        )
+        SectionSpacer()
 
-        // Editor
-        Text("Editor", style = MaterialTheme.typography.titleMedium)
-        ListItem(
-            headline = { Text("Default mode") },
-            supportingText = { Text(state.defaultEditorMode.name) },
-            onClick = { /* open editor mode picker */ }
+        SectionTitle("AI Assistant")
+        SettingsItem(
+            headline = "AI model",
+            supporting = state.settings.aiModel,
+            onClick = { showModelPicker = true }
         )
-        ListItem(
-            headline = { Text("Auto-save") },
-            trailingContent = {
-                Switch(
-                    checked = state.autoSave,
-                    onCheckedChange = viewModel::onAutoSaveChange
-                )
-            }
+        SettingsItem(
+            headline = "Backend URL",
+            supporting = state.settings.backendUrl.ifBlank { "Default (built-in)" },
+            onClick = { showBackendUrlPicker = true }
         )
-        ListItem(
-            headline = { Text("Word-count goal") },
-            supportingText = { Text("${state.wordGoal} words") },
-            onClick = { /* open slider */ }
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        SectionSpacer()
 
-        // AI
-        Text("AI Assistant", style = MaterialTheme.typography.titleMedium)
-        ListItem(
-            headline = { Text("AI model") },
-            supportingText = { Text(state.aiModel) },
-            onClick = { /* open model picker */ }
+        SectionTitle("Synchronization")
+        ToggleItem(
+            headline = "Background sync",
+            supporting = "Sync with Supabase when signed in",
+            checked = state.settings.syncEnabled,
+            onCheckedChange = viewModel::onSyncEnabledChange
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        SectionSpacer()
 
-        // Sync
-        Text("Synchronization", style = MaterialTheme.typography.titleMedium)
-        ListItem(
-            headline = { Text("Background sync") },
-            trailingContent = {
-                Switch(
-                    checked = state.syncEnabled,
-                    onCheckedChange = viewModel::onSyncEnabledChange
-                )
-            }
+        SectionTitle("Export")
+        SettingsItem(
+            headline = "Default format",
+            supporting = state.settings.defaultExportFormat.name,
+            onClick = { showFormatPicker = true }
         )
-        ListItem(
-            headline = { Text("Backend URL") },
-            supportingText = { Text(state.backendUrl.ifBlank { "Default" }) },
-            onClick = { /* open URL editor */ }
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        SectionSpacer()
 
-        // Export
-        Text("Export", style = MaterialTheme.typography.titleMedium)
-        ListItem(
-            headline = { Text("Default format") },
-            supportingText = { Text(state.defaultExportFormat.name) },
-            onClick = { /* open format picker */ }
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // About
-        Text("About", style = MaterialTheme.typography.titleMedium)
-        ListItem(
-            headline = { Text("About NoteFlow AI") },
-            onClick = { /* open about */ }
-        )
-        ListItem(
-            headline = { Text("Version") },
-            supportingText = { Text("1.0.0") },
-            enabled = false
-        )
+        SectionTitle("About")
+        SettingsItem(headline = "NoteFlow AI", supporting = "Offline-first notes with AI assistance")
+        SettingsItem(headline = "Version", supporting = "1.0.0")
+        SectionSpacer()
     }
 
-    if (showDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showDialog = false },
+    if (confirmSignOut) {
+        AlertDialog(
+            onDismissRequest = { confirmSignOut = false },
             title = { Text("Sign out") },
-            text = { Text("Sign out of your account?") },
+            text = { Text("Sign out of your account? Local notes stay on this device.") },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    showDialog = false
+                TextButton(onClick = {
+                    confirmSignOut = false
                     viewModel.signOut()
                 }) { Text("Sign out") }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") }
             }
         )
     }
+
+    RadioPickerDialog(
+        visible = showEditorModePicker,
+        title = "Default editor mode",
+        options = EditorMode.entries.map { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } },
+        selectedIndex = EditorMode.entries.indexOf(state.settings.defaultEditorMode),
+        onDismiss = { showEditorModePicker = false },
+        onPick = { index ->
+            viewModel.onEditorModeChange(EditorMode.entries[index])
+            showEditorModePicker = false
+        }
+    )
+
+    SliderDialog(
+        visible = showWordGoalPicker,
+        title = "Word-count goal",
+        value = state.settings.wordGoal,
+        onDismiss = { showWordGoalPicker = false },
+        onConfirm = {
+            viewModel.onWordGoalChange(it)
+            showWordGoalPicker = false
+        }
+    )
+
+    TextPickerDialog(
+        visible = showModelPicker,
+        title = "AI model",
+        initial = state.settings.aiModel,
+        placeholder = "gemini-2.5-flash",
+        onDismiss = { showModelPicker = false },
+        onConfirm = {
+            viewModel.onAiModelChange(it)
+            showModelPicker = false
+        }
+    )
+
+    TextPickerDialog(
+        visible = showBackendUrlPicker,
+        title = "AI backend URL",
+        initial = state.settings.backendUrl,
+        placeholder = "https://your-backend.example.com",
+        onDismiss = { showBackendUrlPicker = false },
+        onConfirm = {
+            viewModel.onBackendUrlChange(it)
+            showBackendUrlPicker = false
+        }
+    )
+
+    RadioPickerDialog(
+        visible = showFormatPicker,
+        title = "Default export format",
+        options = ExportFormat.entries.map { it.name },
+        selectedIndex = ExportFormat.entries.indexOf(state.settings.defaultExportFormat),
+        onDismiss = { showFormatPicker = false },
+        onPick = { index ->
+            viewModel.onExportFormatChange(ExportFormat.entries[index])
+            showFormatPicker = false
+        }
+    )
 }
 
-private fun Spacer(modifier: Modifier) = androidx.compose.foundation.layout.Spacer(modifier = modifier)
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(vertical = 8.dp)
+    )
+}
+
+@Composable
+private fun SectionSpacer() {
+    Spacer(modifier = Modifier.height(16.dp))
+}
+
+@Composable
+private fun SettingsItem(
+    headline: String,
+    supporting: String? = null,
+    leading: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+            )
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (leading != null) {
+            leading()
+            Spacer(modifier = Modifier.padding(end = 12.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(headline, style = MaterialTheme.typography.bodyLarge)
+            if (supporting != null) {
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToggleItem(
+    headline: String,
+    supporting: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(headline, style = MaterialTheme.typography.bodyLarge)
+            if (supporting != null) {
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun RadioPickerDialog(
+    visible: Boolean,
+    title: String,
+    options: List<String>,
+    selectedIndex: Int,
+    onDismiss: () -> Unit,
+    onPick: (Int) -> Unit
+) {
+    if (!visible) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEachIndexed { index, option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(index) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = index == selectedIndex, onClick = { onPick(index) })
+                        Text(option)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun TextPickerDialog(
+    visible: Boolean,
+    title: String,
+    initial: String,
+    placeholder: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    if (!visible) return
+    var value by remember(title) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { value = it },
+                placeholder = { Text(placeholder) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(value) }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun SliderDialog(
+    visible: Boolean,
+    title: String,
+    value: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    if (!visible) return
+    var current by remember { mutableStateOf(value.toFloat()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                Text("${current.toInt()} words", style = MaterialTheme.typography.bodyLarge)
+                Slider(
+                    value = current,
+                    onValueChange = { current = it },
+                    valueRange = 0f..10_000f
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(current.toInt()) }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}

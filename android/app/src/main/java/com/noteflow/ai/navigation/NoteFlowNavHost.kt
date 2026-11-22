@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
@@ -16,7 +17,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Today
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -71,6 +71,10 @@ private data class DrawerDestination(
 /**
  * Root navigation: collapsible drawer on phones, permanent drawer on tablets,
  * edge-to-edge Scaffold, and a global Ctrl+K command palette.
+ *
+ * The host owns the single TopAppBar for every screen except the editor,
+ * which provides its own toolbar (back / save / dictation / AI) — so exactly
+ * one app bar is ever visible (P1-9 fix).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,8 +99,9 @@ fun NoteFlowNavHost() {
     )
 
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    val isEditorRoute = currentRoute?.startsWith("editor/") == true
     val currentTitle = when {
-        currentRoute?.startsWith("editor/") == true -> "Note"
+        isEditorRoute -> "Note"
         currentRoute == Routes.FOLDERS -> "Folders"
         currentRoute == Routes.TAGS -> "Tags"
         currentRoute == Routes.SEARCH -> "Search"
@@ -110,7 +115,7 @@ fun NoteFlowNavHost() {
 
     fun navigateTo(route: String) {
         navController.navigate(route) {
-            popUpTo(Routes.notes(NoteFilterType.ALL)) { saveState = true }
+            popUpTo(Routes.NOTES) { saveState = true }
             launchSingleTop = true
             restoreState = true
         }
@@ -134,31 +139,33 @@ fun NoteFlowNavHost() {
         val content: @Composable () -> Unit = {
             Scaffold(
                 topBar = {
-                    TopAppBar(
-                        title = { Text(currentTitle) },
-                        navigationIcon = {
-                            if (!isWide) {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Filled.Home, contentDescription = "Open navigation")
+                    if (!isEditorRoute) {
+                        TopAppBar(
+                            title = { Text(currentTitle) },
+                            navigationIcon = {
+                                if (!isWide) {
+                                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                        Icon(Icons.Filled.Menu, contentDescription = "Open navigation")
+                                    }
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { navController.navigate(Routes.SEARCH) }) {
+                                    Icon(Icons.Filled.Search, contentDescription = "Search notes")
+                                }
+                                IconButton(onClick = { navController.navigate(Routes.AI) }) {
+                                    Icon(Icons.Filled.AutoAwesome, contentDescription = "AI Assistant")
                                 }
                             }
-                        },
-                        actions = {
-                            IconButton(onClick = { navController.navigate(Routes.SEARCH) }) {
-                                Icon(Icons.Filled.Search, contentDescription = "Search notes")
-                            }
-                            IconButton(onClick = { navController.navigate(Routes.AI) }) {
-                                Icon(Icons.Filled.AutoAwesome, contentDescription = "AI Assistant")
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
             ) { padding ->
                 Box(
                     modifier = Modifier
                         .padding(padding)
                         .onPreviewKeyEvent { event ->
-                            if (event.ctrlPressed && event.key == Key.K) {
+                            if (event.type == type.KeyUp && event.ctrlPressed && event.key == Key.K) {
                                 showPalette = true
                                 true
                             } else {
@@ -206,7 +213,7 @@ fun NoteFlowNavHost() {
                                 noteId = noteId,
                                 onNoteCreated = { newId ->
                                     navController.navigate(Routes.editor(newId)) {
-                                        popUpTo(Routes.editor(noteId)) { inclusive = true }
+                                        popUpTo(Routes.EDITOR) { inclusive = true }
                                     }
                                 },
                                 onNavigateBack = { navController.popBackStack() },

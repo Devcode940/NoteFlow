@@ -105,8 +105,11 @@ interface AuthRepository {
     val currentUser: Flow<UserProfile?>
     val isFirebaseConfigured: Boolean
 
-    /** Launches the Google Sign-In flow (Credential Manager) and signs in with Firebase. */
-    suspend fun signInWithGoogle(): Result<UserProfile>
+    /**
+     * Exchanges a Google ID token (obtained via Credential Manager in the
+     * UI, which owns the Activity-based account flow) for a Firebase session.
+     */
+    suspend fun signInWithIdToken(idToken: String): Result<UserProfile>
 
     suspend fun signOut()
 

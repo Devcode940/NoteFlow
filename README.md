@@ -1,261 +1,209 @@
 # NoteFlow AI
 
-**NoteFlow AI** is a production-ready, offline-first native Android note-taking app
-built for developers, professionals, students, and power users. It combines local
-persistence, folder/tag organization, real-time cloud sync, and server-side AI
-assistance — with solid security throughout and multiple export options.
+**NoteFlow AI** is an offline-first native Android note-taking app with
+folder/tag organization, cloud sync (Supabase), and server-side AI assistance
+(Gemini behind a secure, token-authenticated backend).
 
 Stack: **Kotlin · Jetpack Compose + Material 3 · Clean Architecture + MVVM ·
-Hilt · Room · DataStore · WorkManager · Navigation Compose · Retrofit + OkHttp ·
-Kotlin Serialization · Firebase Auth + Google Sign-In · Supabase PostgreSQL ·
-Gemini via secure backend**.
+Hilt · Room · DataStore · WorkManager · Retrofit + OkHttp · Firebase Auth +
+Google Sign-In (Credential Manager) · Supabase PostgreSQL (RLS) · Gemini via
+secure backend (server.ts)**
 
 ---
 
-## 📱 Technology Stack
+## Production hardening status (this release)
 
-| Layer | Technology |
-|-------|------------|
-| Language | Kotlin |
-| UI | Jetpack Compose + Material 3 |
-| Architecture | Clean Architecture + MVVM |
-| Dependency Injection | Hilt 2.51.1 |
-| Database | Room 2.6.1 (offline-first) |
-| Preferences | DataStore |
-| Background work | WorkManager 2.9.1 |
-| Navigation | Navigation Compose |
-| Networking | Retrofit 2.11.0 + OkHttp 4.12.0 |
-| Serialization | Kotlin Serialization |
-| Authentication | Firebase Authentication + Google Sign-In (Credential Manager) |
-| Cloud database | Supabase PostgreSQL (Row Level Security) |
-| AI | Google Gemini 2.5 Flash via secure backend (`server.ts`) |
-| Markdown | Native Compose renderer (no WebView — no XSS) |
-| PDF export | Android `PdfDocument` |
-| Files | Storage Access Framework (SAF) |
-| Voice dictation | Android `SpeechRecognizer` |
-| Images | Coil 2.7.0 |
-| Build | Gradle Kotlin DSL, minSdk 26 / targetSdk 35 |
+This repository has been through a full production-readiness pass. The major
+fixes, grouped by area:
+
+**Build & launch**
+- Fixed the cold-start crash: the start destination route now matches the
+  composable pattern (`notes/{filter}?arg={arg}` with an optional argument).
+- Fixed every compile blocker: missing `asStateFlow`/`update`/layout/icon
+  imports, a Kotlin keyword used as an identifier, an 11-flow `combine`, a
+  duplicate `Command` declaration, unbalanced parentheses, references to a
+  non-existent use case, and nullable/non-nullable mismatches.
+- Added the Gradle wrapper (Gradle 8.9) and `kotlin("test")` so `./gradlew`
+  works from a clean clone and the JVM tests compile.
+
+**Editor (the core feature)**
+- The editor now persists exactly what the user typed: the ViewModel owns the
+  edited title/content, auto-saves on a settings-configured debounce, and
+  explicit save writes through `SaveNoteContentUseCase`. (Previously edits
+  were silently discarded on save.)
+- Title is editable; editor text survives rotation (`rememberSaveable`); the
+  "note re-emitted" observer seeds the text once per note id instead of on
+  every emission (no more clobbering in-progress edits).
+- Voice dictation destroys its `SpeechRecognizer` on leave-composition;
+  mic-permission flow includes an explicit rationale message.
+
+**Sync & data integrity**
+- Schema ↔ DTO alignment: `supabase-schema.sql` now uses the snake_case
+  column names the PostgREST DTOs actually send (`user_id`, `created_at`,
+  `folder_id`, `sort_order`). Migration notes for existing v1 tables are in
+  the schema file. **Cloud sync works for the first time.**
+- Note+tags+outbox mutations run inside one Room transaction; remote applies
+  enforce last-write-wins in the repository as well as in SyncManager.
+- `syncNow()` is guarded by a mutex; remote pulls paginate (`limit`/`offset`,
+  200 per page); Supabase calls share the configured OkHttp client (30s
+  connect / 120s read / 30s write timeouts — previously NO timeout).
+
+**Networking & backend**
+- Streaming chat uses a strict JSON SSE envelope (`{"type":"start"|"delta"|
+  "error"|"done"}`) parsed by a unit-tested `SseParser` — the client no
+  longer appends raw JSON fragments to chat output. The server line-buffers
+  upstream SSE so tokens split across network chunks are not lost.
+- Backend: exact CORS allowlist (no more `*.vercel.app` wildcard), bounded
+  upstream timeouts (AbortSignal / SDK timeout), client-requested model is
+  honored against an allowlist, user content is framed with a per-request
+  nonce, streaming errors emit friendly messages only, per-user quota map is
+  bounded, global unhandled-rejection hooks.
+- Android: all AI traffic goes through one URL-rewrite interceptor (settings
+  and build-time URLs can no longer diverge), HTTPS is enforced for the AI
+  backend and Supabase in release builds, tokens refresh proactively before
+  expiry, and user-facing errors never contain raw exception text.
+
+**Lifecycle, UI & accessibility**
+- Query/sort/selection survive process death (`SavedStateHandle`); batch
+  trash has a single combined Undo; the dead error state was removed;
+  duplicate per-screen TopAppBars were removed (single app bar per screen);
+  AI chat uses `LazyColumn` (token streaming no longer re-measures the whole
+  transcript); selection icons announce state; quick actions/generators are
+  functional against the text box.
+
+**Observability & QA**
+- Structured `Logger` facade + local bounded crash log (`CrashGuard`), no
+  user content in logs, release builds disable HTTP logging.
+- Test suite: fixed `SyncMergeTest`/`TextStatsTest`/`MarkdownParserTest` and
+  added `SseParserTest` plus `NoteEditorViewModelSaveTest` — the latter two
+  are regression tests for the streaming-format and editor-save defects.
+- CI (`.github/workflows/ci.yml`): debug build + unit tests, backend
+  typecheck, and a schema↔DTO consistency guard.
 
 ---
 
-## 📁 Project Structure
+## Project structure
 
 ```
 NoteFlow AI/
-├── android/                 # Native Android app (Gradle Kotlin DSL)
+├── android/                     # Native Android app (Gradle Kotlin DSL)
 │   ├── app/
-│   │   ├── src/main/
-│   │   │   ├── java/com/noteflow/ai/
-│   │   │   │   ├── MainActivity.kt
-│   │   │   │   ├── NoteFlowApplication.kt   # Hilt app, schedules sync
-│   │   │   │   ├── navigation/              # Nav graph + Ctrl+K palette
-│   │   │   │   ├── di/                      # Hilt modules
-│   │   │   │   ├── core/                    # designsystem, common, security
-│   │   │   │   ├── data/                    # local, remote, repository
-│   │   │   │   ├── domain/                  # model, repository, usecase
-│   │   │   │   └── feature/                 # notes, editor, folders, tags,
-│   │   │   │   │                              search, ai, export, auth,
-│   │   │   │   │                              settings, profile, commandpalette
-│   │   │   └── res/                         # themes, strings, icons, manifest
-│   │   ├── build.gradle.kts
-│   │   ├── AndroidManifest.xml
-│   │   ├── google-services.json.example   # Firebase config template
-│   │   └── proguard-rules.pro
-│   ├── build.gradle.kts
-│   ├── gradle.properties                  # noteflow.* config keys
-│   ├── gradle/libs.versions.toml
-│   ├── settings.gradle.kts
-│   ├── .gitignore
-│   └── README.android.md                  # build & deploy guide
-├── server.ts                              # Secure Gemini backend (Express)
-├── src/auth.ts                            # Firebase Admin ID-token verifier
-├── supabase-schema.sql                    # Hardened schema + RLS policies
-├── .gitignore
-├── LICENSE
-└── README.md
+│   │   ├── src/main/java/com/noteflow/ai/
+│   │   │   ├── MainActivity.kt
+│   │   │   ├── NoteFlowApplication.kt     # Hilt app, CrashGuard, sync schedule
+│   │   │   ├── navigation/                # Nav graph + Ctrl+K palette
+│   │   │   ├── di/                        # Hilt modules + backend URL interceptor
+│   │   │   ├── core/                      # designsystem, common (SseParser, Logger),
+│   │   │   │                              # security
+│   │   │   ├── data/                      # local (Room), remote, repository
+│   │   │   ├── domain/                    # model, repository, usecase
+│   │   │   └── feature/                   # notes, editor, folders, tags, search,
+│   │   │                                  # ai, export, auth, settings, profile
+│   │   ├── src/test/                      # JVM unit tests incl. regression tests
+│   │   └── src/main/res/xml/              # backup rules (DB excluded from cloud)
+│   ├── gradle/libs.versions.toml          # pinned dependency catalog
+│   └── gradlew                            # wrapper (Gradle 8.9)
+├── server.ts                    # Secure Gemini/OpenRouter backend (Express)
+├── src/auth.ts                  # Firebase Admin ID-token verifier
+├── supabase-schema.sql          # v2 schema, snake_case, RLS policies
+├── package.json / tsconfig.json # backend tooling + typecheck
+└── .github/workflows/ci.yml     # build + tests + typecheck + schema guard
 ```
 
----
-
-## 🔋 Features
-
-### Navigation (all destinations work)
-All Notes · Recent Notes · Favorites · Pinned Notes · Archived Notes · Folders ·
-Tags · Downloads & Exports · AI Assistant · Settings · User Profile
-
-### Note management
-- Create, edit, duplicate, delete (soft-delete to trash with undo)
-- Automatic saving while typing; offline-first Room persistence
-- Folders with custom emoji icons and colors; multiple tags per note
-- Pin / favorite / archive; search across title + content
-- Sort by updated/created/title/custom order; word & char counts; reading time
-- Empty-state and error-state handling; notes survive restart
-
-### Markdown editor
-- Edit / Preview / Focus modes; live Markdown preview
-- Formatting toolbar (headings, bold, italic, strikethrough, code, lists,
-  checklists, blockquotes, tables, links, horizontal rules)
-- Word-count goals, reading-time indicator, auto-save
-- Voice dictation via `SpeechRecognizer`; keyboard-aware layouts
-- Safe rendering of untrusted content (native Compose, no WebView)
-
-### AI Assistant (powered by Gemini via secure backend — no API key in the app)
-- **12 quick actions:** auto-title, summarize, improve, expand, simplify,
-  translate, fix, tone, bullets, headline, todos, questions
-- **4 generators:** outline, full draft, ideas, continue writing
-- Conversational panel with streaming responses, conversation history,
-  copy / insert into note, regenerate, cancel, error recovery
-- Configurable model selection; per-user rate quotas enforced server-side
-
-### Offline-first synchronization (Supabase + Firebase)
-- Room is the local source of truth; all writes happen immediately offline
-- Pending ops tracked in a sync outbox; pushed when online
-- Last-write-wins merge (remote wins only if strictly newer; local wins ties)
-- WorkManager background sync with retry; sync states (Synced/Pending/Syncing/Failed/Local-only)
-- Fully usable when Supabase is unavailable
-
-### Export
-- TXT, Markdown, HTML (standalone, styled), PDF (`PdfDocument`)
-- Share via Android share sheet; save to user-selected directory (SAF)
-- Individual or multiple notes; escaped content (no XSS in exports)
-
-### Voice dictation
-- Start/stop recording; insert recognized text into the editor
-- Microphone permission handling; unavailable-service and error handling
-
-### Command palette (Ctrl+K)
-- Create note, search notes, create folder, switch theme, open AI assistant,
-  export note, open settings, navigate to favorites, archive note
-- Plus editor keyboard shortcuts (Ctrl+Enter save, Ctrl+E preview, Ctrl+F focus)
-
-### Settings (DataStore-persisted)
-- Light / dark / system theme; default editor mode; auto-save; word-count goal
-- AI model; backend URL; sync; default export format; account management; about
-
-### Security
-- No API keys in the app; Firebase ID token on every AI request
-- Strict CORS allowlist; rate limiting (20 AI chat/action/min, 10 generate/min)
-- Request size caps; input validation; secure error responses
-- Markdown XSS defense (http/https links only); HTML export escapes everything
-- Prompt-injection defense (system prompts server-side only)
-- Supabase Row Level Security: users access only their own `owner`-scoped rows
-- No plaintext passwords/keys/tokens stored on disk
-
----
-
-## 📡 API Endpoints (secure backend)
-
-All AI endpoints require a `Authorization: Bearer <Firebase ID token>` header.
-
-- `GET /api/health` — health check
-- `POST /api/ai/chat` — non-streaming chat (20/min per user)
-- `POST /api/ai/chat/stream` — SSE streaming chat (`data:` lines, `[DONE]`)
-- `POST /api/ai/action` — 12 quick actions (20/min per user)
-- `POST /api/ai/generate` — 4 generators (10/min per user)
-
-Request bodies match the Android `AiApi`/`SupabaseApi` Retrofit contracts.
-
----
-
-## ⚙️ Setup
-
-### 1. Android app configuration
-
-Create `android/app/google-services.json` from `google-services.json.example`:
-1. Firebase Console → add Android app (package `com.noteflow.ai`)
-2. Download `google-services.json` → `android/app/google-services.json` (gitignored)
-3. Enable **Google Sign-In**; copy the **Web client ID**
-
-In `android/gradle.properties` add (never commit real values):
-
-```properties
-noteflow.backendUrl=http://10.0.2.2:3000/          # emulator default
-noteflow.supabaseUrl=https://your-project.supabase.co
-noteflow.supabaseAnonKey=your-supabase-anon-key
-noteflow.googleWebClientId=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
-```
-
-For release signing, create `android/app/keystore.properties` (gitignored).
-
-### 2. Backend (`server.ts`)
-
-Deploy `server.ts` and set:
-
-```
-GEMINI_API_KEY=your-server-side-gemini-key   # never in the Android app
-OPENROUTER_API_KEY=optional-fallback-key
-ALLOWED_ORIGINS=https://your-app.example.com # production CORS allowlist
-PORT=3000
-npm install express cors express-rate-limit dotenv @google/genai firebase-admin
-npm start
-```
-
-### 3. Supabase (cloud sync)
-
-Run `supabase-schema.sql` in the Supabase SQL Editor. It creates `notes` and
-`folders` with `owner` (Firebase UID) columns and Row Level Security policies;
-anonymous access is denied.
-
-### 4. Build
+## Building the Android app
 
 ```bash
 cd android
-./gradlew assembleDebug          # debug APK
-./gradlew assembleRelease        # signed release APK (needs keystore.properties)
-./gradlew bundleRelease          # signed AAB for Play Store
+./gradlew assembleDebug          # debug build (works without any credentials)
 ./gradlew testDebugUnitTest      # JVM unit tests
 ```
 
-Full build/deploy guide: `android/README.android.md`
+Configuration (all optional; the app runs fully offline/local-only without
+them) — set in `android/gradle.properties`, `~/.gradle/gradle.properties`, or
+CI env vars:
 
----
+| Property | Purpose |
+|---|---|
+| `noteflow.backendUrl` | AI backend base URL (default `http://10.0.2.2:3000/` for the emulator; must be HTTPS in release) |
+| `noteflow.supabaseUrl` | Supabase project URL (must be HTTPS) |
+| `noteflow.supabaseAnonKey` | Supabase anon key |
+| `noteflow.googleWebClientId` | OAuth web client id for Google Sign-In |
 
-## 🔒 Security
+For Firebase features add `google-services.json` (template:
+`android/app/google-services.json.example`). Without it the app builds and
+runs in local-only mode with sign-in disabled.
 
-- **No API keys in the app** — Gemini key lives only on `server.ts`; the app sends Firebase ID tokens.
-- **CORS allowlist** — backend only accepts configured origins (plus no-Origin for mobile/curl).
-- **Rate limits** — per signed-in user: 20 AI chat/action requests/min, 10 generate/min.
-- **Input validation** — message/text/prompt size caps; `noteContext` truncated to 10k chars.
-- **Markdown XSS defense** — native Compose renderer (no WebView); only `http`/`https` links clickable.
-- **Prompt-injection defense** — system instructions server-side only, never exposed to clients.
-- **Supabase RLS** — row-level policies on `owner`; `anon` role denied.
-- **No plaintext secrets** — tokens/keys never written to disk or logs.
+Release signing uses a gitignored `android/keystore.properties`
+(`storeFile`, `storePassword`, `keyAlias`, `keyPassword`); without it
+`assembleRelease` produces an unsigned artifact. **Never claim a release
+build works without executing it** — run `./gradlew assembleRelease` and
+install the APK on a device before shipping.
 
----
+## Running the AI backend
 
-## 🧪 Testing
+```bash
+npm install
+cp .env.example .env   # then fill in the values below
+npm run dev            # development
+npm start              # production (serves dist/ if present)
+npm run typecheck      # TypeScript check (also runs in CI)
+```
 
-Unit tests (JVM) cover `MarkdownParser`, `TextStats`, `SyncMerge`, and `HtmlExporter`
-(`android/app/src/test`). ViewModel, Room, repository, and Compose UI tests run
-with Robolectric/JUnit via `./gradlew testDebugUnitTest`.
+Environment variables:
 
----
+| Variable | Required | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | yes (or `OPENROUTER_API_KEY`) | server-side model key — never ships to clients |
+| `OPENROUTER_API_KEY` | no | routes all AI through OpenRouter instead of Gemini |
+| `FIREBASE_SERVICE_ACCOUNT` / `GOOGLE_APPLICATION_CREDENTIALS` | yes for auth | Firebase Admin credentials for ID-token verification |
+| `ALLOWED_ORIGINS` | yes in production | EXACT CORS origins, comma-separated |
+| `PORT` | no | default 3000 |
+| `AI_UPSTREAM_TIMEOUT_MS` | no | upstream call timeout, default 90000 |
 
-## 🗺️ Roadmap
+Deployment requirements: HTTPS termination (reverse proxy / managed
+platform), a process manager or platform restarts, and log retention on
+stdout. The per-user quota is in-memory — for multi-instance deployments
+externalise it to Redis (`rate-limit-redis`) or accept per-instance limits.
 
-Done:
-- Core note-taking, folders, tags, pin/archive/trash
-- Markdown editor (edit/preview/focus), voice dictation
-- AI assistant: 12 quick actions + 4 generators + streaming chat
-- Offline-first sync with conflict-safe merge, WorkManager
-- TXT/MD/HTML/PDF export, SAF, command palette (Ctrl+K)
-- Firebase Auth + Google Sign-In; Supabase RLS
-- Native Android app (this release)
+## Supabase setup
 
-Future:
-- Real-time collaboration
-- Enhanced search (full-text ranking)
-- Plugin system
-- Home-screen widgets
+1. Create the tables/policies: paste `supabase-schema.sql` into the Supabase
+   SQL Editor and run it (for v1 tables, apply the `ALTER TABLE ... RENAME`
+   block at the top of the file first).
+2. Enable third-party auth: Supabase Dashboard → Authentication →
+   Third-Party Auth → add your Firebase project (this makes `auth.uid()`
+   resolve to the Firebase UID inside RLS policies).
+3. Set `noteflow.supabaseUrl` / `noteflow.supabaseAnonKey` in the app build.
 
----
+## Monitoring & recovery
 
-## 📜 License
+- **App:** uncaught exceptions are appended to a bounded on-device log;
+  `CrashGuard.drain(context)` retrieves and clears it for bug reports. Add
+  Firebase Crashlytics (with `google-services.json`) for fleet reporting.
+- **Backend:** logs to stdout (`console.error` with context per endpoint);
+  ship to your platform's log drain. `/api/health` is unauthenticated and
+  suitable for uptime checks. Watch HTTP 429/5xx rates for quota/service
+  degradation.
+- **Rollback:** the backend is stateless — redeploy the previous image/commit
+  and restart. The database schema is additive; rolling back the Android app
+  is safe because sync is last-write-wins with an idempotent outbox.
+- **Data recovery:** the Room database is excluded from cloud backup by
+  design (see `app/src/main/res/xml/backup_rules.xml`); user data recovery
+  comes from Supabase (server-side) or device-to-device transfer.
 
-MIT License - Copyright 2026 NoteFlow AI
+## Testing
 
-Free to use, copy, modify, and distribute. No warranty.
+```bash
+cd android && ./gradlew testDebugUnitTest
+```
 
----
+Covers: Markdown/XSS URL safety, HTML export escaping, text statistics, the
+sync conflict rule, the SSE envelope parser (regression for the
+JSON-fragment streaming bug), and the editor save round-trip (regression for
+the discarded-edits bug). Critical paths still needing device/instrumented
+coverage: sign-in end-to-end, sync against a live Supabase, and export flows
+— run these on a real device before each release.
 
-Made with care. Happy note-taking!
+## License
+
+See [LICENSE](LICENSE).
